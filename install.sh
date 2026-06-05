@@ -256,11 +256,11 @@ run_apply_or_dry_run() {
   whitelist_require_root
   whitelist_require_commands
   echo "即将应用规则：未命中白名单的来源访问所选 TCP/UDP 端口会被拒绝。"
-  read -r -p "确认继续？输入 YES: " confirm
-  if [[ "${confirm^^}" != "YES" ]]; then
-    echo "已取消。"
-    exit 0
-  fi
+  read -r -p "确认继续？[Y/n]: " confirm
+  case "${confirm}" in
+    n|N|no|NO) echo "已取消。"; exit 0 ;;
+    *) ;;
+  esac
   whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${selected_codes[@]}" "${manual_ips[@]}" | whitelist_run_rendered_commands
   echo "规则已应用。"
 
