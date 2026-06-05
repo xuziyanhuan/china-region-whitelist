@@ -445,12 +445,16 @@ update_script() {
 
   echo "正在更新脚本..."
   # 备份当前目录
-  mv "${ROOT}" "${ROOT}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+  local backup_dir="${ROOT}.backup.$(date +%Y%m%d_%H%M%S)"
+  mv "${ROOT}" "${backup_dir}" 2>/dev/null || true
 
   # 移动新版本到当前位置
   mv "${temp_dir}/china-region-whitelist-main" "${parent}/${basename}"
 
   rm -rf "${temp_dir}"
+
+  # 更新成功，清理备份
+  rm -rf "${backup_dir}"
 
   # 重新安装快捷命令并切换到新版脚本
   bash "${parent}/${basename}/install.sh" install-shortcut
