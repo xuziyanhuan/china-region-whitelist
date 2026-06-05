@@ -202,6 +202,12 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("5) update_script ;;", script)
         self.assertIn("6) uninstall_all ;;", script)
 
+    def test_install_script_update_reloads_new_script(self):
+        script = INSTALL_SH.read_text(encoding="utf-8")
+
+        self.assertIn("bash \"${parent}/${basename}/install.sh\" install-shortcut", script)
+        self.assertIn("exec bash \"${parent}/${basename}/install.sh\" U", script)
+
     def test_install_script_status_lists_per_port_resources(self):
         script = INSTALL_SH.read_text(encoding="utf-8")
 

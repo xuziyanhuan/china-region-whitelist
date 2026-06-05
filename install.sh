@@ -452,12 +452,13 @@ update_script() {
 
   rm -rf "${temp_dir}"
 
-  # 重新安装快捷命令
-  install_shortcut
+  # 重新安装快捷命令并切换到新版脚本
+  bash "${parent}/${basename}/install.sh" install-shortcut
 
   echo "更新完成！当前版本: v${latest_version}"
   echo "提示：已有的防火墙规则不受影响，继续生效。"
-  read -r -p "按回车键返回菜单..."
+  sleep 1
+  exec bash "${parent}/${basename}/install.sh" U
 }
 
 show_menu() {
