@@ -470,9 +470,9 @@ show_menu() {
 请选择操作：
 0. 退出
 1. 应用白名单规则
-2. 更新本地 CIDR 数据
-3. 查看当前托管规则
-4. 清除本脚本创建的规则和 ipset
+2. 查看当前托管规则
+3. 清除本脚本创建的规则和 ipset
+4. 更新本地 CIDR 数据
 5. 检查并更新脚本
 6. 清除规则并删除脚本本体
 EOF
@@ -482,9 +482,9 @@ EOF
     case "${choice}" in
       0) echo "退出。"; exit 0 ;;
       1) run_apply_or_dry_run 0; read -r -p "按回车键返回菜单..." ;;
-      2) update_cidr_data ;;
-      3) status_rules; read -r -p "按回车键返回菜单..." ;;
-      4) clear_rules; read -r -p "按回车键返回菜单..." ;;
+      2) status_rules; read -r -p "按回车键返回菜单..." ;;
+      3) clear_rules; read -r -p "按回车键返回菜单..." ;;
+      4) update_cidr_data ;;
       5) update_script ;;
       6) uninstall_all ;;
       *) echo "输入无效，请输入 0-6。"; sleep 0.5 ;;
