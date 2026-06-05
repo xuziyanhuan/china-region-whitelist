@@ -82,8 +82,13 @@ class FirewallLibTests(unittest.TestCase):
                     result.stdout,
                 )
                 self.assertIn(
-                    f"iptables -C FORWARD -j WL_{port} 2>/dev/null || "
-                    f"iptables -I FORWARD 1 -j WL_{port}",
+                    f"while iptables -C FORWARD -j WL_{port} 2>/dev/null; "
+                    f"do iptables -D FORWARD -j WL_{port}; done",
+                    result.stdout,
+                )
+                self.assertIn(
+                    f"iptables -C FORWARD -m conntrack --ctstate DNAT -j WL_{port} 2>/dev/null || "
+                    f"iptables -I FORWARD 1 -m conntrack --ctstate DNAT -j WL_{port}",
                     result.stdout,
                 )
                 self.assertIn(
@@ -94,6 +99,7 @@ class FirewallLibTests(unittest.TestCase):
         self.assertNotIn("po0_region_whitelist", result.stdout)
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("multiport", result.stdout)
+        self.assertNotIn("iptables -C FORWARD -j WL_22 2>/dev/null || iptables -I FORWARD 1 -j WL_22", result.stdout)
 
     def test_renders_manual_whitelist_ips(self):
         result = run_tool("render-apply", "--ports", "22", "990100", "198.51.100.7", "203.0.113.0/24")
@@ -114,6 +120,7 @@ class FirewallLibTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("awk '/^-N WL_/ {print $2}'", result.stdout)
         self.assertIn("while iptables -C FORWARD -j $chain 2>/dev/null; do iptables -D FORWARD -j $chain; done", result.stdout)
+        self.assertIn("while iptables -C FORWARD -m conntrack --ctstate DNAT -j $chain 2>/dev/null; do iptables -D FORWARD -m conntrack --ctstate DNAT -j $chain; done", result.stdout)
         self.assertIn("ipset list -name 2>/dev/null | awk '/^wl_/'", result.stdout)
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("po0", result.stdout)

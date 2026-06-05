@@ -189,11 +189,19 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
             commands.append(f"ipset add {set_name} {client_ip} -exist")
 
         commands.append(f"iptables -N {chain_name} 2>/dev/null || true")
-        for entry_chain in ENTRY_CHAINS:
-            commands.append(
-                f"iptables -C {entry_chain} -j {chain_name} 2>/dev/null || "
-                f"iptables -I {entry_chain} 1 -j {chain_name}"
-            )
+        commands.append(
+            f"iptables -C INPUT -j {chain_name} 2>/dev/null || "
+            f"iptables -I INPUT 1 -j {chain_name}"
+        )
+        commands.append(
+            f"while iptables -C FORWARD -j {chain_name} 2>/dev/null; "
+            f"do iptables -D FORWARD -j {chain_name}; done"
+        )
+        forward_jump = f"-m conntrack --ctstate DNAT -j {chain_name}"
+        commands.append(
+            f"iptables -C FORWARD {forward_jump} 2>/dev/null || "
+            f"iptables -I FORWARD 1 {forward_jump}"
+        )
         for protocol in ("tcp", "udp"):
             port_match = f"-p {protocol} --dport {port}"
             accept_rule = f"{port_match} -m set --match-set {set_name} src -j ACCEPT"
@@ -210,8 +218,9 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
 def render_clear_commands() -> list[str]:
     commands = [
         f"for chain in $(iptables -S | awk '/^-N {CHAIN_PREFIX}/ {{print $2}}'); do "
-        f"while iptables -C {entry_chain} -j $chain 2>/dev/null; do iptables -D {entry_chain} -j $chain; done; done"
-        for entry_chain in ENTRY_CHAINS
+        f"while iptables -C INPUT -j $chain 2>/dev/null; do iptables -D INPUT -j $chain; done; "
+        f"while iptables -C FORWARD -j $chain 2>/dev/null; do iptables -D FORWARD -j $chain; done; "
+        f"while iptables -C FORWARD -m conntrack --ctstate DNAT -j $chain 2>/dev/null; do iptables -D FORWARD -m conntrack --ctstate DNAT -j $chain; done; done"
     ]
     commands.extend(
         [
