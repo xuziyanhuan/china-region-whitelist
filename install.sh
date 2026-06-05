@@ -476,6 +476,9 @@ update_script() {
   # 重新安装快捷命令并切换到新版脚本
   bash "${parent}/${basename}/install.sh" install-shortcut
 
+  # 清理 shell 命令缓存
+  hash -r 2>/dev/null || true
+
   echo "更新完成！当前版本: v${latest_version}"
   echo "提示：已有的防火墙规则不受影响，继续生效。"
   sleep 1
