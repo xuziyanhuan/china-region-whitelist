@@ -179,7 +179,24 @@ interactive_select_ports() {
 
 confirm_client_ip() {
   local client_ip="$1"
+  shift
+  local -a ports=("$@")
+
   if [[ -z "${client_ip}" ]]; then
+    echo ""
+    return
+  fi
+
+  # 只在选择了端口 22 时才询问
+  local has_ssh=0
+  for port in "${ports[@]}"; do
+    if [[ "${port}" == "22" ]]; then
+      has_ssh=1
+      break
+    fi
+  done
+
+  if [[ "${has_ssh}" -eq 0 ]]; then
     echo ""
     return
   fi
@@ -219,7 +236,7 @@ run_apply_or_dry_run() {
   selected_ports_csv="$(IFS=,; echo "${selected_ports[*]}")"
 
   local client_ip
-  client_ip="$(confirm_client_ip "$(whitelist_detect_ssh_client_ip)")"
+  client_ip="$(confirm_client_ip "$(whitelist_detect_ssh_client_ip)" "${selected_ports[@]}")"
 
   echo
   if [[ "${#selected_codes[@]}" -gt 0 ]]; then
