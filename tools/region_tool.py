@@ -116,6 +116,19 @@ def collect_cidrs(metadata: dict, data_dir: Path, codes: list[str]) -> list[str]
     cidrs: list[str] = []
 
     for code in codes:
+        # 检查是否为手动输入的 IP/CIDR（包含点号）
+        if "." in code:
+            # 验证并添加手动 IP/CIDR
+            try:
+                ipaddress.ip_network(code, strict=False)
+                if code not in seen:
+                    seen.add(code)
+                    cidrs.append(code)
+            except ValueError:
+                raise SystemExit(f"Invalid IP/CIDR: {code}")
+            continue
+
+        # 处理地区代码
         region_file = data_dir / find_region_file(metadata, code)
         if not region_file.exists():
             raise SystemExit(f"Missing region file: {region_file}")
@@ -129,7 +142,7 @@ def collect_cidrs(metadata: dict, data_dir: Path, codes: list[str]) -> list[str]
                 cidrs.append(line)
 
     if not cidrs:
-        raise SystemExit("Selected regions contain no CIDR ranges")
+        raise SystemExit("No CIDR ranges or IPs provided")
     return cidrs
 
 

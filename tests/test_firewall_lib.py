@@ -95,6 +95,19 @@ class FirewallLibTests(unittest.TestCase):
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("multiport", result.stdout)
 
+    def test_renders_manual_whitelist_ips(self):
+        result = run_tool("render-apply", "--ports", "22", "990100", "198.51.100.7", "203.0.113.0/24")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ipset add wl_22 10.0.0.0/8 -exist", result.stdout)
+        self.assertIn("ipset add wl_22 198.51.100.7 -exist", result.stdout)
+        self.assertIn("ipset add wl_22 203.0.113.0/24 -exist", result.stdout)
+
+    def test_rejects_invalid_manual_whitelist_ips(self):
+        result = run_tool("render-apply", "--ports", "22", "not-an-ip")
+
+        self.assertNotEqual(result.returncode, 0)
+
     def test_clear_removes_managed_per_port_rules(self):
         result = run_tool("render-clear")
 
@@ -174,23 +187,26 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("for target in U u; do", script)
         self.assertIn("cat >\"${target_dir}/${target}\"", script)
         self.assertIn('exec bash "${ROOT}/install.sh" U', script)
+        self.assertIn("0. 退出", script)
         self.assertIn("1. 应用白名单规则", script)
-        self.assertIn("2. 预览将执行的命令", script)
+        self.assertIn("2. 更新本地 CIDR 数据", script)
         self.assertIn("3. 查看当前托管规则", script)
         self.assertIn("4. 清除本脚本创建的规则和 ipset", script)
-        self.assertIn("5. 清除规则并删除脚本本体", script)
-        self.assertIn("1) run_apply_or_dry_run 0 ;;", script)
-        self.assertIn("2) run_apply_or_dry_run 1 ;;", script)
-        self.assertIn("3) status_rules ;;", script)
-        self.assertIn("4) clear_rules ;;", script)
-        self.assertIn("5) uninstall_all ;;", script)
+        self.assertIn("5. 检查并更新脚本", script)
+        self.assertIn("6. 清除规则并删除脚本本体", script)
+        self.assertIn("0) echo \"退出。\"; exit 0 ;;", script)
+        self.assertIn("1) run_apply_or_dry_run 0", script)
+        self.assertIn("2) update_cidr_data ;;", script)
+        self.assertIn("3) status_rules", script)
+        self.assertIn("4) clear_rules", script)
+        self.assertIn("5) update_script ;;", script)
+        self.assertIn("6) uninstall_all ;;", script)
 
     def test_install_script_status_lists_per_port_resources(self):
         script = INSTALL_SH.read_text(encoding="utf-8")
 
-        self.assertIn("managed per-port ipsets", script)
-        self.assertIn("grep '^wl_'", script)
-        self.assertIn("managed per-port iptables chains", script)
+        self.assertIn("== 当前白名单规则 ==", script)
+        self.assertIn("== iptables 规则详情 ==", script)
         self.assertIn("awk '/^-N WL_/ {print $2}'", script)
 
     def test_install_script_supports_uninstalling_rules_shortcuts_and_project(self):

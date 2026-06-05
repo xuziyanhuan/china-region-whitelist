@@ -76,6 +76,7 @@ interactive_select_codes() {
   whitelist_show_provinces >&2
   echo >&2
   echo "输入编号或省份名称，多个用空格/逗号分隔，例如：1 2 广东省 江苏省" >&2
+  echo "输入 0 跳过省/市选择，直接手动输入 IP" >&2
 
   local province_input
   province_input="$(read_from_tty "省份: ")"
@@ -83,6 +84,11 @@ interactive_select_codes() {
     echo "未输入省份。" >&2
     exit 1
   }
+
+  # 如果输入 0，跳过省市选择
+  if [[ "${province_input}" == "0" ]]; then
+    return
+  fi
 
   local province_selector province_code city_input city_selector city_code
   while IFS= read -r province_selector; do
@@ -108,6 +114,32 @@ interactive_select_codes() {
       done < <(split_user_list "${city_input}")
     fi
   done < <(split_user_list "${province_input}")
+}
+
+interactive_input_manual_ips() {
+  MANUAL_IPS=()
+  echo >&2
+  echo "请输入白名单 IP 或 CIDR，多个用空格/逗号分隔，例如：1.2.3.4 192.168.1.0/24" >&2
+  echo "留空跳过" >&2
+
+  local ip_input
+  ip_input="$(read_from_tty "IP/CIDR: ")"
+
+  if [[ -z "${ip_input}" ]]; then
+    return
+  fi
+
+  local ip_or_cidr
+  while IFS= read -r ip_or_cidr; do
+    [[ -n "${ip_or_cidr}" ]] || continue
+
+    # 简单验证 IP 或 CIDR 格式
+    if [[ "${ip_or_cidr}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]]; then
+      MANUAL_IPS+=("${ip_or_cidr}")
+    else
+      echo "警告：跳过无效的 IP/CIDR：${ip_or_cidr}" >&2
+    fi
+  done < <(split_user_list "${ip_input}")
 }
 
 interactive_select_ports() {
@@ -162,13 +194,24 @@ confirm_client_ip() {
 
 run_apply_or_dry_run() {
   local dry_run="$1"
-  local -a selected_codes selected_ports
+  local -a selected_codes selected_ports manual_ips
   local selected_ports_csv
   interactive_select_codes
   selected_codes=("${SELECTED_CODES[@]}")
+
+  # 如果没有选择地区，询问是否手动输入 IP
   if [[ "${#selected_codes[@]}" -eq 0 ]]; then
-    echo "未选择任何地区。" >&2
-    exit 1
+    interactive_input_manual_ips
+    manual_ips=("${MANUAL_IPS[@]}")
+
+    if [[ "${#manual_ips[@]}" -eq 0 ]]; then
+      echo "未选择任何地区或输入任何 IP。" >&2
+      exit 1
+    fi
+  else
+    # 已选择地区，询问是否额外添加手动 IP
+    interactive_input_manual_ips
+    manual_ips=("${MANUAL_IPS[@]}")
   fi
 
   interactive_select_ports
@@ -179,12 +222,17 @@ run_apply_or_dry_run() {
   client_ip="$(confirm_client_ip "$(whitelist_detect_ssh_client_ip)")"
 
   echo
-  echo "将使用以下地区代码：${selected_codes[*]}"
+  if [[ "${#selected_codes[@]}" -gt 0 ]]; then
+    echo "将使用以下地区代码：${selected_codes[*]}"
+  fi
+  if [[ "${#manual_ips[@]}" -gt 0 ]]; then
+    echo "将添加以下手动 IP：${manual_ips[*]}"
+  fi
   echo "将限制以下 TCP/UDP 端口：${selected_ports_csv}"
   echo
 
   if [[ "${dry_run}" == "1" ]]; then
-    whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${selected_codes[@]}"
+    whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${selected_codes[@]}" "${manual_ips[@]}"
     return
   fi
 
@@ -196,7 +244,7 @@ run_apply_or_dry_run() {
     echo "已取消。"
     exit 0
   fi
-  whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${selected_codes[@]}" | whitelist_run_rendered_commands
+  whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${selected_codes[@]}" "${manual_ips[@]}" | whitelist_run_rendered_commands
   echo "规则已应用。"
 
   # 持久化规则
