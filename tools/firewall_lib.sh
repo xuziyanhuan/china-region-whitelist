@@ -61,7 +61,11 @@ whitelist_render_apply_commands() {
 }
 
 whitelist_render_clear_commands() {
-  whitelist_region_tool render-clear
+  if [[ "$#" -eq 0 ]]; then
+    whitelist_region_tool render-clear
+  else
+    whitelist_region_tool render-clear "$@"
+  fi
 }
 
 whitelist_require_root() {
@@ -136,4 +140,8 @@ whitelist_run_rendered_commands() {
     echo "+ ${command_line}"
     eval "${command_line}"
   done
+}
+
+whitelist_list_managed_ports() {
+  whitelist_region_tool list-managed-ports
 }

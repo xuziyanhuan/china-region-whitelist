@@ -215,19 +215,64 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
     return commands
 
 
-def render_clear_commands() -> list[str]:
-    commands = [
-        f"for chain in $(iptables -S | awk '/^-N {CHAIN_PREFIX}/ {{print $2}}'); do "
-        f"while iptables -C INPUT -j $chain 2>/dev/null; do iptables -D INPUT -j $chain; done; "
-        f"while iptables -C FORWARD -j $chain 2>/dev/null; do iptables -D FORWARD -j $chain; done; "
-        f"while iptables -C FORWARD -m conntrack --ctstate DNAT -j $chain 2>/dev/null; do iptables -D FORWARD -m conntrack --ctstate DNAT -j $chain; done; done"
-    ]
-    commands.extend(
-        [
-            f"for chain in $(iptables -S | awk '/^-N {CHAIN_PREFIX}/ {{print $2}}'); do iptables -F $chain 2>/dev/null || true; iptables -X $chain 2>/dev/null || true; done",
-            f"for set_name in $(ipset list -name 2>/dev/null | awk '/^{SET_PREFIX}/'); do ipset destroy $set_name 2>/dev/null || true; done",
-        ]
-    )
+def list_managed_ports() -> list[str]:
+    """List all ports currently managed by whitelist rules."""
+    try:
+        result = subprocess.run(
+            ["iptables", "-S"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+
+        ports = []
+        for line in result.stdout.splitlines():
+            if f"-N {CHAIN_PREFIX}" in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    chain_name = parts[1]
+                    if chain_name.startswith(CHAIN_PREFIX):
+                        port = chain_name[len(CHAIN_PREFIX):]
+                        if port and port not in ports:
+                            ports.append(port)
+        return sorted(ports, key=lambda p: int(p) if p.isdigit() else 999999)
+    except Exception:
+        return []
+
+
+def render_clear_commands(ports: list[str] | None = None) -> list[str]:
+    """Render commands to clear whitelist rules. If ports is None, clear all."""
+    commands = []
+
+    if ports is None:
+        commands.append(
+            f"for chain in $(iptables -S | awk '/^-N {CHAIN_PREFIX}/ {{print $2}}'); do "
+            f"while iptables -C INPUT -j $chain 2>/dev/null; do iptables -D INPUT -j $chain; done; "
+            f"while iptables -C FORWARD -j $chain 2>/dev/null; do iptables -D FORWARD -j $chain; done; "
+            f"while iptables -C FORWARD -m conntrack --ctstate DNAT -j $chain 2>/dev/null; do iptables -D FORWARD -m conntrack --ctstate DNAT -j $chain; done; done"
+        )
+        commands.extend(
+            [
+                f"for chain in $(iptables -S | awk '/^-N {CHAIN_PREFIX}/ {{print $2}}'); do iptables -F $chain 2>/dev/null || true; iptables -X $chain 2>/dev/null || true; done",
+                f"for set_name in $(ipset list -name 2>/dev/null | awk '/^{SET_PREFIX}/'); do ipset destroy $set_name 2>/dev/null || true; done",
+            ]
+        )
+    else:
+        for port in ports:
+            chain_name = chain_name_for_port(port)
+            set_name = set_name_for_port(port)
+            commands.extend(
+                [
+                    f"while iptables -C INPUT -j {chain_name} 2>/dev/null; do iptables -D INPUT -j {chain_name}; done",
+                    f"while iptables -C FORWARD -j {chain_name} 2>/dev/null; do iptables -D FORWARD -j {chain_name}; done",
+                    f"while iptables -C FORWARD -m conntrack --ctstate DNAT -j {chain_name} 2>/dev/null; do iptables -D FORWARD -m conntrack --ctstate DNAT -j {chain_name}; done",
+                    f"iptables -F {chain_name} 2>/dev/null || true",
+                    f"iptables -X {chain_name} 2>/dev/null || true",
+                    f"ipset destroy {set_name} 2>/dev/null || true",
+                ]
+            )
     return commands
 
 
@@ -407,9 +452,12 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--ports", required=True, type=parse_ports)
     render.add_argument("codes", nargs="+")
 
-    subparsers.add_parser("render-clear")
+    clear_parser = subparsers.add_parser("render-clear")
+    clear_parser.add_argument("--ports", type=parse_ports, default=None)
 
     subparsers.add_parser("render-status")
+
+    subparsers.add_parser("list-managed-ports")
 
     return parser
 
@@ -436,9 +484,14 @@ def main() -> int:
         cidrs = collect_cidrs(metadata, args.data_dir, args.codes)
         print("\n".join(render_apply_commands(cidrs, args.ports, args.client_ip)))
     elif args.command == "render-clear":
-        print("\n".join(render_clear_commands()))
+        print("\n".join(render_clear_commands(args.ports)))
     elif args.command == "render-status":
         return render_status_command(metadata, args.data_dir)
+    elif args.command == "list-managed-ports":
+        ports = list_managed_ports()
+        if ports:
+            print("\n".join(ports))
+        return 0
     return 0
 
 

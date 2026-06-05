@@ -125,6 +125,18 @@ class FirewallLibTests(unittest.TestCase):
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("po0", result.stdout)
 
+    def test_clear_specific_ports(self):
+        result = run_tool("render-clear", "--ports", "22,80")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("iptables -D INPUT -j WL_22", result.stdout)
+        self.assertIn("iptables -D INPUT -j WL_80", result.stdout)
+        self.assertIn("iptables -X WL_22", result.stdout)
+        self.assertIn("iptables -X WL_80", result.stdout)
+        self.assertIn("ipset destroy wl_22", result.stdout)
+        self.assertIn("ipset destroy wl_80", result.stdout)
+        self.assertNotIn("for chain in", result.stdout)
+
     def test_rejects_invalid_ports(self):
         for ports in ("0", "65536", "abc"):
             with self.subTest(ports=ports):

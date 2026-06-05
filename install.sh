@@ -352,8 +352,42 @@ status_rules() {
 clear_rules() {
   whitelist_require_root
   whitelist_require_commands
-  whitelist_render_clear_commands | whitelist_run_rendered_commands
-  echo "已清除本脚本管理的规则。"
+
+  # 列出当前管理的端口
+  local -a managed_ports
+  mapfile -t managed_ports < <(whitelist_list_managed_ports)
+
+  if [[ "${#managed_ports[@]}" -eq 0 ]]; then
+    echo "当前没有管理任何端口的规则。"
+    return
+  fi
+
+  echo "当前管理的端口："
+  for port in "${managed_ports[@]}"; do
+    echo "  - ${port}"
+  done
+  echo
+
+  read -r -p "请选择要清除的端口（多个用空格分隔，输入 ALL 清除全部）: " selection
+
+  local -a selected_ports
+  if [[ "${selection^^}" == "ALL" ]]; then
+    echo "将清除全部端口的规则..."
+    whitelist_render_clear_commands | whitelist_run_rendered_commands
+  else
+    IFS=' ' read -r -a selected_ports <<<"${selection}"
+    if [[ "${#selected_ports[@]}" -eq 0 ]]; then
+      echo "未选择任何端口。"
+      return
+    fi
+
+    echo "将清除以下端口的规则：${selected_ports[*]}"
+    local ports_csv
+    ports_csv="$(IFS=,; echo "${selected_ports[*]}")"
+    whitelist_render_clear_commands --ports "${ports_csv}" | whitelist_run_rendered_commands
+  fi
+
+  echo "已清除选定的规则。"
 }
 
 uninstall_all() {
