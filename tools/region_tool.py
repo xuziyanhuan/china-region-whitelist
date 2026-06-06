@@ -184,14 +184,6 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
 
     commands: list[str] = []
 
-    # 在 INPUT 和 FORWARD 链最前面放行 lo 接口流量
-    for chain in ENTRY_CHAINS:
-        lo_rule = f"-i lo -j ACCEPT"
-        commands.append(
-            f"iptables -C {chain} {lo_rule} 2>/dev/null || "
-            f"iptables -I {chain} 1 {lo_rule}"
-        )
-
     for port in ports:
         set_name = set_name_for_port(port)
         chain_name = chain_name_for_port(port)
@@ -227,6 +219,15 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
                     f"iptables -C {chain_name} {reject_rule} 2>/dev/null || iptables -A {chain_name} {reject_rule}",
                 ]
             )
+
+    # 在所有白名单链都插入后，最后在 INPUT 和 FORWARD 链最前面放行 lo 接口流量
+    for chain in ENTRY_CHAINS:
+        lo_rule = f"-i lo -j ACCEPT"
+        commands.append(
+            f"iptables -C {chain} {lo_rule} 2>/dev/null || "
+            f"iptables -I {chain} 1 {lo_rule}"
+        )
+
     return commands
 
 
