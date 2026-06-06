@@ -378,6 +378,11 @@ clear_rules() {
   if [[ "${selection^^}" == "ALL" ]]; then
     echo "将清除全部端口的规则..."
     whitelist_render_clear_commands | whitelist_run_rendered_commands
+    # 清除所有元数据文件
+    if [[ -d "${ROOT}/.metadata" ]]; then
+      rm -f "${ROOT}/.metadata/manual_ips_"*.txt
+      echo "已清除元数据文件。"
+    fi
   else
     IFS=' ' read -r -a selected_ports <<<"${selection}"
     if [[ "${#selected_ports[@]}" -eq 0 ]]; then
@@ -389,6 +394,13 @@ clear_rules() {
     local ports_csv
     ports_csv="$(IFS=,; echo "${selected_ports[*]}")"
     whitelist_render_clear_commands --ports "${ports_csv}" | whitelist_run_rendered_commands
+    # 清除对应端口的元数据文件
+    for port in "${selected_ports[@]}"; do
+      if [[ -f "${ROOT}/.metadata/manual_ips_${port}.txt" ]]; then
+        rm -f "${ROOT}/.metadata/manual_ips_${port}.txt"
+      fi
+    done
+    echo "已清除元数据文件。"
   fi
 
   echo "已清除选定的规则。"
