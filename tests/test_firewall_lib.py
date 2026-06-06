@@ -72,13 +72,19 @@ class FirewallLibTests(unittest.TestCase):
         result = run_tool("render-apply", "--ports", "22,80,443", "990100")
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        # lo 规则应该只出现一次（在开始处）
+        lo_count = result.stdout.count("iptables -C INPUT -i lo -j ACCEPT")
+        self.assertEqual(lo_count, 1, "lo rule should appear exactly once for INPUT")
+        lo_count = result.stdout.count("iptables -C FORWARD -i lo -j ACCEPT")
+        self.assertEqual(lo_count, 1, "lo rule should appear exactly once for FORWARD")
+
         for port in ("22", "80", "443"):
             with self.subTest(port=port):
                 self.assertIn(f"ipset create wl_{port} hash:net family inet -exist", result.stdout)
                 self.assertIn(f"iptables -N WL_{port} 2>/dev/null || true", result.stdout)
                 self.assertIn(
                     f"iptables -C INPUT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I INPUT 1 -j WL_{port}",
+                    f"iptables -I INPUT 2 -j WL_{port}",
                     result.stdout,
                 )
                 self.assertIn(
@@ -88,7 +94,7 @@ class FirewallLibTests(unittest.TestCase):
                 )
                 self.assertIn(
                     f"iptables -C FORWARD -m conntrack --ctstate DNAT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I FORWARD 1 -m conntrack --ctstate DNAT -j WL_{port}",
+                    f"iptables -I FORWARD 2 -m conntrack --ctstate DNAT -j WL_{port}",
                     result.stdout,
                 )
                 self.assertIn(
@@ -124,6 +130,9 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("ipset list -name 2>/dev/null | awk '/^wl_/'", result.stdout)
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("po0", result.stdout)
+        # 清除所有规则时应该删除 lo 规则
+        self.assertIn("while iptables -C INPUT -i lo -j ACCEPT 2>/dev/null; do iptables -D INPUT -i lo -j ACCEPT; done", result.stdout)
+        self.assertIn("while iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i lo -j ACCEPT; done", result.stdout)
 
     def test_clear_specific_ports(self):
         result = run_tool("render-clear", "--ports", "22,80")

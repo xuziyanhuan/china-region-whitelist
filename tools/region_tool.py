@@ -184,6 +184,14 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
 
     commands: list[str] = []
 
+    # 首先确保 lo 接口放行规则在最前面（只添加一次）
+    for chain in ENTRY_CHAINS:
+        lo_rule = f"-i lo -j ACCEPT"
+        commands.append(
+            f"iptables -C {chain} {lo_rule} 2>/dev/null || "
+            f"iptables -I {chain} 1 {lo_rule}"
+        )
+
     for port in ports:
         set_name = set_name_for_port(port)
         chain_name = chain_name_for_port(port)
@@ -196,9 +204,10 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
             commands.append(f"ipset add {set_name} {client_ip} -exist")
 
         commands.append(f"iptables -N {chain_name} 2>/dev/null || true")
+        # 白名单链插入到位置 2（在 lo 规则之后）
         commands.append(
             f"iptables -C INPUT -j {chain_name} 2>/dev/null || "
-            f"iptables -I INPUT 1 -j {chain_name}"
+            f"iptables -I INPUT 2 -j {chain_name}"
         )
         commands.append(
             f"while iptables -C FORWARD -j {chain_name} 2>/dev/null; "
@@ -207,7 +216,7 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
         forward_jump = f"-m conntrack --ctstate DNAT -j {chain_name}"
         commands.append(
             f"iptables -C FORWARD {forward_jump} 2>/dev/null || "
-            f"iptables -I FORWARD 1 {forward_jump}"
+            f"iptables -I FORWARD 2 {forward_jump}"
         )
         for protocol in ("tcp", "udp"):
             port_match = f"-p {protocol} --dport {port}"
@@ -219,14 +228,6 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
                     f"iptables -C {chain_name} {reject_rule} 2>/dev/null || iptables -A {chain_name} {reject_rule}",
                 ]
             )
-
-    # 在所有白名单链都插入后，最后在 INPUT 和 FORWARD 链最前面放行 lo 接口流量
-    for chain in ENTRY_CHAINS:
-        lo_rule = f"-i lo -j ACCEPT"
-        commands.append(
-            f"iptables -C {chain} {lo_rule} 2>/dev/null || "
-            f"iptables -I {chain} 1 {lo_rule}"
-        )
 
     return commands
 
@@ -275,6 +276,13 @@ def render_clear_commands(ports: list[str] | None = None) -> list[str]:
                 f"for set_name in $(ipset list -name 2>/dev/null | awk '/^{SET_PREFIX}/'); do ipset destroy $set_name 2>/dev/null || true; done",
             ]
         )
+        # 清除所有端口规则后，删除 lo 接口放行规则
+        for chain in ENTRY_CHAINS:
+            lo_rule = f"-i lo -j ACCEPT"
+            commands.append(
+                f"while iptables -C {chain} {lo_rule} 2>/dev/null; "
+                f"do iptables -D {chain} {lo_rule}; done"
+            )
     else:
         for port in ports:
             chain_name = chain_name_for_port(port)
