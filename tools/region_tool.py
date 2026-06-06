@@ -277,6 +277,17 @@ def render_docker_apply_commands(interfaces: list[str]) -> list[str]:
     return commands
 
 
+def render_docker_clear_commands() -> list[str]:
+    commands: list[str] = []
+    for chain in ENTRY_CHAINS:
+        commands.append(
+            f"for iface in $(iptables -S {chain} | awk '/^-A {chain} -i (docker0|br-[^ ]+) -j ACCEPT$/ {{print $4}}' | sort -u); do "
+            f"while iptables -C {chain} -i \"$iface\" -j ACCEPT 2>/dev/null; "
+            f"do iptables -D {chain} -i \"$iface\" -j ACCEPT; done; done"
+        )
+    return commands
+
+
 def list_managed_ports() -> list[str]:
     """List all ports currently managed by whitelist rules."""
     try:
@@ -555,6 +566,8 @@ def build_parser() -> argparse.ArgumentParser:
     docker_parser = subparsers.add_parser("render-docker-apply")
     docker_parser.add_argument("--interfaces", required=True, type=parse_interfaces)
 
+    subparsers.add_parser("render-docker-clear")
+
     status_parser = subparsers.add_parser("render-status")
     status_parser.add_argument("--metadata-dir", default="")
 
@@ -625,6 +638,8 @@ def main() -> int:
         print("\n".join(render_clear_commands(args.ports)))
     elif args.command == "render-docker-apply":
         print("\n".join(render_docker_apply_commands(args.interfaces)))
+    elif args.command == "render-docker-clear":
+        print("\n".join(render_docker_clear_commands()))
     elif args.command == "render-status":
         metadata_dir = Path(args.metadata_dir) if args.metadata_dir else None
         return render_status_command(metadata, args.data_dir, metadata_dir)

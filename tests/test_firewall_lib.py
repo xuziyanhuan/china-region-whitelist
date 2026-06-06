@@ -178,6 +178,16 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("if ip link show docker0 >/dev/null 2>&1; then iptables -I INPUT 2 -i docker0 -j ACCEPT; fi", result.stdout)
         self.assertIn("iptables -I FORWARD 2 -i br-9731588312b1 -j ACCEPT", result.stdout)
 
+    def test_renders_docker_clear_rules(self):
+        result = run_tool("render-docker-clear")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('for iface in $(iptables -S INPUT | awk \'/^-A INPUT -i (docker0|br-[^ ]+) -j ACCEPT$/ {print $4}\' | sort -u); do while iptables -C INPUT -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D INPUT -i "$iface" -j ACCEPT; done; done', result.stdout)
+        self.assertIn('for iface in $(iptables -S FORWARD | awk \'/^-A FORWARD -i (docker0|br-[^ ]+) -j ACCEPT$/ {print $4}\' | sort -u); do while iptables -C FORWARD -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i "$iface" -j ACCEPT; done; done', result.stdout)
+        self.assertNotIn("-i lo -j ACCEPT", result.stdout)
+        self.assertNotIn("WL_", result.stdout)
+        self.assertNotIn("ipset destroy", result.stdout)
+
     def test_rejects_invalid_docker_interfaces(self):
         result = run_tool("render-docker-apply", "--interfaces", "eth0")
 
@@ -289,9 +299,15 @@ class FirewallLibTests(unittest.TestCase):
     def test_install_script_skips_unmanaged_clear_ports(self):
         script = INSTALL_SH.read_text(encoding="utf-8")
 
-        self.assertIn('端口 ${requested_port} 当前未由本脚本管理，已跳过。', script)
+        self.assertIn("0. 返回上级菜单", script)
+        self.assertIn("1. 清除 Docker 白名单", script)
+        self.assertIn('if [[ "${selection}" == "0" ]]; then', script)
+        self.assertIn('whitelist_render_docker_clear_commands | whitelist_run_rendered_commands', script)
+        self.assertIn('端口 ${requested_port} 当前未由本脚本管理，请重新选择。', script)
         self.assertIn("未选择任何当前托管的端口。", script)
+        self.assertIn('local -a selected_ports=()', script)
         self.assertIn('done < <(split_user_list "${selection}")', script)
+        self.assertIn("continue", script)
         self.assertNotIn("IFS=' ' read -r -a selected_ports <<<\"${selection}\"", script)
 
     def test_install_script_supports_uninstalling_rules_shortcuts_and_project(self):
@@ -308,6 +324,8 @@ class FirewallLibTests(unittest.TestCase):
 
         self.assertIn("whitelist_render_docker_apply_commands()", script)
         self.assertIn('whitelist_region_tool render-docker-apply --interfaces "${interfaces}"', script)
+        self.assertIn("whitelist_render_docker_clear_commands()", script)
+        self.assertIn("whitelist_region_tool render-docker-clear", script)
 
     def test_firewall_lib_auto_installs_missing_iptables_and_ipset(self):
         script = FIREWALL_LIB.read_text(encoding="utf-8")

@@ -440,34 +440,65 @@ clear_rules() {
   whitelist_require_root
   whitelist_require_commands
 
-  # 列出当前管理的端口
-  local -a managed_ports
-  mapfile -t managed_ports < <(whitelist_list_managed_ports)
+  while true; do
+    local -a managed_ports
+    mapfile -t managed_ports < <(whitelist_list_managed_ports)
 
-  if [[ "${#managed_ports[@]}" -eq 0 ]]; then
-    echo "当前没有管理任何端口的规则。"
-    return
-  fi
-
-  echo "当前管理的端口："
-  for port in "${managed_ports[@]}"; do
-    echo "  - ${port}"
-  done
-  echo
-
-  read -r -p "请选择要清除的端口（多个用空格分隔，输入 ALL 清除全部）: " selection
-
-  local -a selected_ports
-  if [[ "${selection^^}" == "ALL" ]]; then
-    echo "将清除全部端口的规则..."
-    whitelist_render_clear_commands | whitelist_run_rendered_commands
-    # 清除所有元数据文件
-    if [[ -d "${ROOT}/.metadata" ]]; then
-      rm -f "${ROOT}/.metadata/manual_ips_"*.txt
-      echo "已清除元数据文件。"
+    echo "当前管理的端口："
+    if [[ "${#managed_ports[@]}" -eq 0 ]]; then
+      echo "  （无）"
+    else
+      local port
+      for port in "${managed_ports[@]}"; do
+        echo "  - ${port}"
+      done
     fi
-  else
-    local requested_port managed_port found seen_ports=" "
+    echo
+    echo "清除选项："
+    echo "0. 返回上级菜单"
+    echo "1. 清除 Docker 白名单"
+    echo "ALL. 清除全部端口规则、lo 和 Docker 白名单"
+    echo
+
+    local selection
+    read -r -p "请选择要清除的端口（多个用空格/逗号分隔，输入 0 返回）: " selection
+
+    if [[ "${selection}" == "0" ]]; then
+      echo "返回上级菜单。"
+      return
+    fi
+
+    if [[ "${selection}" == "1" ]]; then
+      echo "将清除 Docker 白名单..."
+      whitelist_render_docker_clear_commands | whitelist_run_rendered_commands
+      echo "已清除 Docker 白名单。"
+      persist_rules
+      continue
+    fi
+
+    if [[ "${selection^^}" == "ALL" ]]; then
+      if [[ "${#managed_ports[@]}" -eq 0 ]]; then
+        echo "当前没有管理任何端口规则，将只清除 lo 和 Docker 白名单..."
+      else
+        echo "将清除全部端口规则..."
+      fi
+      whitelist_render_clear_commands | whitelist_run_rendered_commands
+      if [[ -d "${ROOT}/.metadata" ]]; then
+        rm -f "${ROOT}/.metadata/manual_ips_"*.txt
+        echo "已清除元数据文件。"
+      fi
+      echo "已清除全部规则。"
+      persist_rules
+      continue
+    fi
+
+    if [[ "${#managed_ports[@]}" -eq 0 ]]; then
+      echo "当前没有管理任何端口规则，请选择 1 清除 Docker 白名单或 0 返回。"
+      continue
+    fi
+
+    local -a selected_ports=()
+    local requested_port managed_port found seen_ports=" " skipped=0
     while IFS= read -r requested_port; do
       [[ -n "${requested_port}" ]] || continue
       found=0
@@ -483,20 +514,20 @@ clear_rules() {
           seen_ports+="${requested_port} "
         fi
       else
-        echo "端口 ${requested_port} 当前未由本脚本管理，已跳过。"
+        echo "端口 ${requested_port} 当前未由本脚本管理，请重新选择。"
+        skipped=1
       fi
     done < <(split_user_list "${selection}")
 
-    if [[ "${#selected_ports[@]}" -eq 0 ]]; then
+    if [[ "${skipped}" -eq 1 || "${#selected_ports[@]}" -eq 0 ]]; then
       echo "未选择任何当前托管的端口。"
-      return
+      continue
     fi
 
     echo "将清除以下端口的规则：${selected_ports[*]}"
     local ports_csv
     ports_csv="$(IFS=,; echo "${selected_ports[*]}")"
     whitelist_render_clear_commands --ports "${ports_csv}" | whitelist_run_rendered_commands
-    # 清除对应端口的元数据文件
     for port in "${selected_ports[@]}"; do
       if [[ -f "${ROOT}/.metadata/manual_ips_${port}.txt" ]]; then
         rm -f "${ROOT}/.metadata/manual_ips_${port}.txt"
@@ -504,16 +535,16 @@ clear_rules() {
     done
     echo "已清除元数据文件。"
 
-    # 检查是否还有剩余的管理端口
     local -a remaining_ports
     mapfile -t remaining_ports < <(whitelist_list_managed_ports)
     if [[ "${#remaining_ports[@]}" -eq 0 ]]; then
       echo "所有端口规则已清除，正在删除 lo 和 Docker 网桥接口规则..."
       whitelist_render_clear_commands | whitelist_run_rendered_commands
     fi
-  fi
 
-  echo "已清除选定的规则。"
+    echo "已清除选定的规则。"
+    persist_rules
+  done
 }
 
 uninstall_all() {
