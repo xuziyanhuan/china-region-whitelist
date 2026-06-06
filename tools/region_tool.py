@@ -184,20 +184,12 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
 
     commands: list[str] = []
 
-    # 首先确保 lo 和 Docker 网桥接口放行规则在最前面
+    # 首先确保 lo 接口放行规则在最前面
     for chain in ENTRY_CHAINS:
-        # lo 接口放行
         lo_rule = f"-i lo -j ACCEPT"
         commands.append(
             f"iptables -C {chain} {lo_rule} 2>/dev/null || "
             f"iptables -I {chain} 1 {lo_rule}"
-        )
-        # Docker 网桥接口放行（docker0 和所有 br- 开头的接口）
-        commands.append(
-            f"for iface in docker0 $(ip link show | awk -F': ' '/^[0-9]+: br-/ {{print $2}}'); do "
-            f"if ip link show \"$iface\" >/dev/null 2>&1; then "
-            f"iptables -C {chain} -i \"$iface\" -j ACCEPT 2>/dev/null || "
-            f"iptables -I {chain} 2 -i \"$iface\" -j ACCEPT; fi; done"
         )
 
     for port in ports:
@@ -212,10 +204,10 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
             commands.append(f"ipset add {set_name} {client_ip} -exist")
 
         commands.append(f"iptables -N {chain_name} 2>/dev/null || true")
-        # 白名单链插入到位置 3（在 lo 和 Docker 网桥之后）
+        # 白名单链插入到位置 2（在 lo 之后）
         commands.append(
             f"iptables -C INPUT -j {chain_name} 2>/dev/null || "
-            f"iptables -I INPUT 3 -j {chain_name}"
+            f"iptables -I INPUT 2 -j {chain_name}"
         )
         commands.append(
             f"while iptables -C FORWARD -j {chain_name} 2>/dev/null; "
@@ -224,7 +216,7 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
         forward_jump = f"-m conntrack --ctstate DNAT -j {chain_name}"
         commands.append(
             f"iptables -C FORWARD {forward_jump} 2>/dev/null || "
-            f"iptables -I FORWARD 3 {forward_jump}"
+            f"iptables -I FORWARD 2 {forward_jump}"
         )
         for protocol in ("tcp", "udp"):
             port_match = f"-p {protocol} --dport {port}"
@@ -236,6 +228,15 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
                     f"iptables -C {chain_name} {reject_rule} 2>/dev/null || iptables -A {chain_name} {reject_rule}",
                 ]
             )
+
+    # 最后插入 Docker 网桥接口放行规则（会把白名单链往后挤）
+    for chain in ENTRY_CHAINS:
+        commands.append(
+            f"for iface in docker0 $(ip link show | awk -F': ' '/^[0-9]+: br-/ {{print $2}}'); do "
+            f"if ip link show \"$iface\" >/dev/null 2>&1; then "
+            f"iptables -C {chain} -i \"$iface\" -j ACCEPT 2>/dev/null || "
+            f"iptables -I {chain} 2 -i \"$iface\" -j ACCEPT; fi; done"
+        )
 
     return commands
 

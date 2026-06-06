@@ -77,7 +77,7 @@ class FirewallLibTests(unittest.TestCase):
         self.assertEqual(lo_count, 1, "lo rule should appear exactly once for INPUT")
         lo_count = result.stdout.count("iptables -C FORWARD -i lo -j ACCEPT")
         self.assertEqual(lo_count, 1, "lo rule should appear exactly once for FORWARD")
-        # Docker 网桥循环应该只出现一次
+        # Docker 网桥循环应该只出现一次（在最后）
         docker_count = result.stdout.count('for iface in docker0 $(ip link show | awk')
         self.assertEqual(docker_count, 2, "docker bridge loop should appear once per chain (INPUT and FORWARD)")
 
@@ -87,7 +87,7 @@ class FirewallLibTests(unittest.TestCase):
                 self.assertIn(f"iptables -N WL_{port} 2>/dev/null || true", result.stdout)
                 self.assertIn(
                     f"iptables -C INPUT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I INPUT 3 -j WL_{port}",
+                    f"iptables -I INPUT 2 -j WL_{port}",
                     result.stdout,
                 )
                 self.assertIn(
@@ -97,7 +97,7 @@ class FirewallLibTests(unittest.TestCase):
                 )
                 self.assertIn(
                     f"iptables -C FORWARD -m conntrack --ctstate DNAT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I FORWARD 3 -m conntrack --ctstate DNAT -j WL_{port}",
+                    f"iptables -I FORWARD 2 -m conntrack --ctstate DNAT -j WL_{port}",
                     result.stdout,
                 )
                 self.assertIn(
