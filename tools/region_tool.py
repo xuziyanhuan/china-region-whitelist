@@ -111,9 +111,11 @@ def find_region_file(metadata: dict, code: str) -> str:
     raise SystemExit(f"Unknown region code: {code}")
 
 
-def collect_cidrs(metadata: dict, data_dir: Path, codes: list[str]) -> list[str]:
+def collect_cidrs(metadata: dict, data_dir: Path, codes: list[str]) -> tuple[list[str], list[str]]:
+    """Collect CIDRs from region codes and manual IPs. Returns (all_cidrs, manual_ips)."""
     seen: set[str] = set()
     cidrs: list[str] = []
+    manual_ips: list[str] = []
 
     for code in codes:
         # 检查是否为手动输入的 IP/CIDR（包含点号）
@@ -124,6 +126,7 @@ def collect_cidrs(metadata: dict, data_dir: Path, codes: list[str]) -> list[str]
                 if code not in seen:
                     seen.add(code)
                     cidrs.append(code)
+                    manual_ips.append(code)
             except ValueError:
                 raise SystemExit(f"Invalid IP/CIDR: {code}")
             continue
@@ -143,7 +146,7 @@ def collect_cidrs(metadata: dict, data_dir: Path, codes: list[str]) -> list[str]
 
     if not cidrs:
         raise SystemExit("No CIDR ranges or IPs provided")
-    return cidrs
+    return cidrs, manual_ips
 
 
 def parse_ports(raw: str) -> list[str]:
@@ -174,9 +177,12 @@ def chain_name_for_port(port: str) -> str:
     return f"{CHAIN_PREFIX}{port}"
 
 
-def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "") -> list[str]:
+def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "", manual_ips: list[str] | None = None) -> list[str]:
     if client_ip:
         ipaddress.ip_address(client_ip)
+
+    if manual_ips is None:
+        manual_ips = []
 
     commands: list[str] = []
     for port in ports:
@@ -185,6 +191,8 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
         commands.append(f"ipset create {set_name} hash:net family inet -exist")
         for cidr in cidrs:
             commands.append(f"ipset add {set_name} {cidr} -exist")
+        for manual_ip in manual_ips:
+            commands.append(f"ipset add {set_name} {manual_ip} -exist")
         if client_ip:
             commands.append(f"ipset add {set_name} {client_ip} -exist")
 
@@ -335,7 +343,7 @@ def lookup_region_name(metadata: dict, code: str) -> str:
     return f"未知地区 ({code})"
 
 
-def render_status_command(metadata: dict, data_dir: Path) -> int:
+def render_status_command(metadata: dict, data_dir: Path, metadata_dir: Path | None = None) -> int:
     """Render human-readable status of current whitelist rules."""
     try:
         result = subprocess.run(
@@ -369,11 +377,22 @@ def render_status_command(metadata: dict, data_dir: Path) -> int:
                 print()
                 continue
 
+            # 读取手动添加的 IP
+            manual_ips_set = set()
+            if metadata_dir:
+                manual_ips_file = metadata_dir / f"manual_ips_{port}.txt"
+                if manual_ips_file.exists():
+                    manual_ips_set = set(manual_ips_file.read_text(encoding="utf-8").strip().split("\n"))
+                    manual_ips_set.discard("")
+
             region_codes = set()
+            manual_cidrs = []
             unknown_cidrs = []
 
             for cidr in members:
-                if cidr in cidr_to_region:
+                if cidr in manual_ips_set:
+                    manual_cidrs.append(cidr)
+                elif cidr in cidr_to_region:
                     region_codes.add(cidr_to_region[cidr])
                 else:
                     unknown_cidrs.append(cidr)
@@ -383,6 +402,11 @@ def render_status_command(metadata: dict, data_dir: Path) -> int:
             for code in sorted(region_codes):
                 region_name = lookup_region_name(metadata, code)
                 print(f"  - {region_name}")
+
+            if manual_cidrs:
+                print(f"  - 手动添加: {', '.join(manual_cidrs[:5])}")
+                if len(manual_cidrs) > 5:
+                    print(f"    ... 及其他 {len(manual_cidrs) - 5} 个")
 
             if unknown_cidrs:
                 print(f"  - 未知来源: {', '.join(unknown_cidrs[:5])}")
@@ -450,12 +474,15 @@ def build_parser() -> argparse.ArgumentParser:
     render = subparsers.add_parser("render-apply")
     render.add_argument("--client-ip", default="")
     render.add_argument("--ports", required=True, type=parse_ports)
+    render.add_argument("--manual-ips", default="")
+    render.add_argument("--metadata-dir", default="")
     render.add_argument("codes", nargs="+")
 
     clear_parser = subparsers.add_parser("render-clear")
     clear_parser.add_argument("--ports", type=parse_ports, default=None)
 
-    subparsers.add_parser("render-status")
+    status_parser = subparsers.add_parser("render-status")
+    status_parser.add_argument("--metadata-dir", default="")
 
     subparsers.add_parser("list-managed-ports")
 
@@ -479,14 +506,49 @@ def main() -> int:
     elif args.command == "resolve-city":
         print(resolve_city(metadata, args.province_selector, args.city_selector)["code"])
     elif args.command == "collect-cidrs":
-        print("\n".join(collect_cidrs(metadata, args.data_dir, args.codes)))
+        cidrs, _ = collect_cidrs(metadata, args.data_dir, args.codes)
+        print("\n".join(cidrs))
     elif args.command == "render-apply":
-        cidrs = collect_cidrs(metadata, args.data_dir, args.codes)
-        print("\n".join(render_apply_commands(cidrs, args.ports, args.client_ip)))
+        cidrs, manual_ips_from_codes = collect_cidrs(metadata, args.data_dir, args.codes)
+
+        # 合并从 --manual-ips 和 codes 中提取的手动 IP
+        all_manual_ips = list(manual_ips_from_codes)
+        if args.manual_ips:
+            extra_manual_ips = [ip.strip() for ip in args.manual_ips.split(",") if ip.strip()]
+            all_manual_ips.extend(extra_manual_ips)
+
+        # 保存手动 IP 元数据
+        if args.metadata_dir and all_manual_ips:
+            metadata_dir = Path(args.metadata_dir)
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+            for port in args.ports:
+                port_metadata_file = metadata_dir / f"manual_ips_{port}.txt"
+                existing_ips = set()
+                if port_metadata_file.exists():
+                    existing_ips = set(line.strip() for line in port_metadata_file.read_text(encoding="utf-8").splitlines() if line.strip())
+                existing_ips.update(all_manual_ips)
+                port_metadata_file.write_text("\n".join(sorted(existing_ips)) + "\n", encoding="utf-8")
+
+        # 如果有 client_ip 且指定了元数据目录，也记录为手动添加
+        if args.metadata_dir and args.client_ip:
+            metadata_dir = Path(args.metadata_dir)
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+            for port in args.ports:
+                port_metadata_file = metadata_dir / f"manual_ips_{port}.txt"
+                existing_ips = set()
+                if port_metadata_file.exists():
+                    existing_ips = set(line.strip() for line in port_metadata_file.read_text(encoding="utf-8").splitlines() if line.strip())
+                existing_ips.add(args.client_ip)
+                port_metadata_file.write_text("\n".join(sorted(existing_ips)) + "\n", encoding="utf-8")
+
+        # 从 --manual-ips 解析的额外手动 IP
+        extra_manual_ips = [ip.strip() for ip in args.manual_ips.split(",") if ip.strip()] if args.manual_ips else []
+        print("\n".join(render_apply_commands(cidrs, args.ports, args.client_ip, extra_manual_ips)))
     elif args.command == "render-clear":
         print("\n".join(render_clear_commands(args.ports)))
     elif args.command == "render-status":
-        return render_status_command(metadata, args.data_dir)
+        metadata_dir = Path(args.metadata_dir) if args.metadata_dir else None
+        return render_status_command(metadata, args.data_dir, metadata_dir)
     elif args.command == "list-managed-ports":
         ports = list_managed_ports()
         if ports:

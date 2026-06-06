@@ -249,7 +249,9 @@ run_apply_or_dry_run() {
   echo
 
   if [[ "${dry_run}" == "1" ]]; then
-    whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${selected_codes[@]}" "${manual_ips[@]}"
+    local manual_ips_csv
+    manual_ips_csv="$(IFS=,; echo "${manual_ips[*]}")"
+    whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${manual_ips_csv}" "${selected_codes[@]}"
     return
   fi
 
@@ -261,7 +263,9 @@ run_apply_or_dry_run() {
     n|N|no|NO) echo "已取消。"; exit 0 ;;
     *) ;;
   esac
-  whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${selected_codes[@]}" "${manual_ips[@]}" | whitelist_run_rendered_commands
+  local manual_ips_csv
+  manual_ips_csv="$(IFS=,; echo "${manual_ips[*]}")"
+  whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${manual_ips_csv}" "${selected_codes[@]}" | whitelist_run_rendered_commands
   echo "规则已应用。"
 
   # 持久化规则
@@ -329,7 +333,7 @@ status_rules() {
 
   echo "== 当前白名单规则 =="
   if command -v ipset >/dev/null 2>&1 && command -v iptables >/dev/null 2>&1; then
-    python3 "${ROOT}/tools/region_tool.py" render-status
+    python3 "${ROOT}/tools/region_tool.py" render-status --metadata-dir "${ROOT}/.metadata"
   else
     echo "ipset 或 iptables 未安装"
     return

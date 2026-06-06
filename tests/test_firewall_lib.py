@@ -195,7 +195,7 @@ class FirewallLibTests(unittest.TestCase):
 
         self.assertIn("interactive_select_ports()", script)
         self.assertIn("selected_ports_csv=\"$(IFS=,; echo \"${selected_ports[*]}\")\"", script)
-        self.assertIn("whitelist_render_apply_commands \"${client_ip}\" \"${selected_ports_csv}\" \"${selected_codes[@]}\"", script)
+        self.assertIn('whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${manual_ips_csv}" "${selected_codes[@]}"', script)
 
     def test_install_script_supports_u_menu_shortcut(self):
         script = INSTALL_SH.read_text(encoding="utf-8")

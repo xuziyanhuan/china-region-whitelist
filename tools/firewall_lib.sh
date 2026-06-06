@@ -5,6 +5,7 @@ WHITELIST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WHITELIST_REGION_TOOL="${WHITELIST_ROOT}/tools/region_tool.py"
 REGIONS_JSON="${REGIONS_JSON:-${WHITELIST_ROOT}/data/regions.json}"
 DATA_DIR="${DATA_DIR:-${WHITELIST_ROOT}/data}"
+METADATA_DIR="${METADATA_DIR:-${WHITELIST_ROOT}/.metadata}"
 
 whitelist_python() {
   if command -v python3 >/dev/null 2>&1; then
@@ -52,12 +53,22 @@ whitelist_collect_cidrs() {
 whitelist_render_apply_commands() {
   local client_ip="${1:-}"
   local ports="${2:-}"
-  shift 2 || true
+  local manual_ips="${3:-}"
+  shift 3 || true
+
+  local -a args=()
   if [[ -n "${client_ip}" ]]; then
-    whitelist_region_tool render-apply --client-ip "${client_ip}" --ports "${ports}" "$@"
-  else
-    whitelist_region_tool render-apply --ports "${ports}" "$@"
+    args+=("--client-ip" "${client_ip}")
   fi
+  args+=("--ports" "${ports}")
+  if [[ -n "${manual_ips}" ]]; then
+    args+=("--manual-ips" "${manual_ips}")
+  fi
+  if [[ -n "${METADATA_DIR:-}" ]]; then
+    args+=("--metadata-dir" "${METADATA_DIR}")
+  fi
+
+  whitelist_region_tool render-apply "${args[@]}" "$@"
 }
 
 whitelist_render_clear_commands() {
