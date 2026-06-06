@@ -7,6 +7,7 @@ import argparse
 import ipaddress
 import json
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -167,12 +168,39 @@ def parse_ports(raw: str) -> list[str]:
     return ports
 
 
+def parse_interfaces(raw: str) -> list[str]:
+    tokens = [token for token in re.split(r"[\s,，、]+", raw.strip()) if token]
+    if not tokens:
+        raise argparse.ArgumentTypeError("interfaces are required")
+
+    seen: set[str] = set()
+    interfaces: list[str] = []
+    for token in tokens:
+        if token != "docker0" and not token.startswith("br-"):
+            raise argparse.ArgumentTypeError(f"invalid Docker bridge interface: {token}")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]+", token):
+            raise argparse.ArgumentTypeError(f"invalid interface name: {token}")
+        if token not in seen:
+            seen.add(token)
+            interfaces.append(token)
+    return interfaces
+
+
 def set_name_for_port(port: str) -> str:
     return f"{SET_PREFIX}{port}"
 
 
 def chain_name_for_port(port: str) -> str:
     return f"{CHAIN_PREFIX}{port}"
+
+
+def entry_insert_position_command(chain: str) -> str:
+    return (
+        f"insert_pos=$(iptables -S {chain} | awk 'BEGIN {{insert=1; rule=0}} "
+        f"/^-A {chain} / {{rule++; if ($0 == \"-A {chain} -i lo -j ACCEPT\" || "
+        f"$0 ~ /^-A {chain} -i (docker0|br-[^ ]+) -j ACCEPT$/) insert=rule+1}} "
+        f"END {{print insert}}')"
+    )
 
 
 def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "", manual_ips: list[str] | None = None) -> list[str]:
@@ -207,7 +235,7 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
         # 白名单链插入到位置 2（在 lo 之后）
         commands.append(
             f"iptables -C INPUT -j {chain_name} 2>/dev/null || "
-            f"iptables -I INPUT 2 -j {chain_name}"
+            f"{{ {entry_insert_position_command('INPUT')}; iptables -I INPUT $insert_pos -j {chain_name}; }}"
         )
         commands.append(
             f"while iptables -C FORWARD -j {chain_name} 2>/dev/null; "
@@ -216,7 +244,7 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
         forward_jump = f"-m conntrack --ctstate DNAT -j {chain_name}"
         commands.append(
             f"iptables -C FORWARD {forward_jump} 2>/dev/null || "
-            f"iptables -I FORWARD 2 {forward_jump}"
+            f"{{ {entry_insert_position_command('FORWARD')}; iptables -I FORWARD $insert_pos {forward_jump}; }}"
         )
         for protocol in ("tcp", "udp"):
             port_match = f"-p {protocol} --dport {port}"
@@ -229,15 +257,23 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
                 ]
             )
 
-    # 最后插入 Docker 网桥接口放行规则（会把白名单链往后挤）
+    return commands
+
+
+def render_docker_apply_commands(interfaces: list[str]) -> list[str]:
+    commands: list[str] = []
     for chain in ENTRY_CHAINS:
         commands.append(
-            f"for iface in docker0 $(ip link show | awk -F': ' '/^[0-9]+: br-/ {{print $2}}'); do "
-            f"if ip link show \"$iface\" >/dev/null 2>&1; then "
-            f"iptables -C {chain} -i \"$iface\" -j ACCEPT 2>/dev/null || "
-            f"iptables -I {chain} 2 -i \"$iface\" -j ACCEPT; fi; done"
+            f"for iface in $(iptables -S {chain} | awk '/^-A {chain} -i (docker0|br-[^ ]+) -j ACCEPT$/ {{print $4}}' | sort -u); do "
+            f"while iptables -C {chain} -i \"$iface\" -j ACCEPT 2>/dev/null; "
+            f"do iptables -D {chain} -i \"$iface\" -j ACCEPT; done; done"
         )
-
+        for interface in reversed(interfaces):
+            quoted_interface = shlex.quote(interface)
+            commands.append(
+                f"if ip link show {quoted_interface} >/dev/null 2>&1; then "
+                f"iptables -I {chain} 2 -i {quoted_interface} -j ACCEPT; fi"
+            )
     return commands
 
 
@@ -516,6 +552,9 @@ def build_parser() -> argparse.ArgumentParser:
     clear_parser = subparsers.add_parser("render-clear")
     clear_parser.add_argument("--ports", type=parse_ports, default=None)
 
+    docker_parser = subparsers.add_parser("render-docker-apply")
+    docker_parser.add_argument("--interfaces", required=True, type=parse_interfaces)
+
     status_parser = subparsers.add_parser("render-status")
     status_parser.add_argument("--metadata-dir", default="")
 
@@ -584,6 +623,8 @@ def main() -> int:
         print("\n".join(render_apply_commands(cidrs, args.ports, args.client_ip, extra_manual_ips)))
     elif args.command == "render-clear":
         print("\n".join(render_clear_commands(args.ports)))
+    elif args.command == "render-docker-apply":
+        print("\n".join(render_docker_apply_commands(args.interfaces)))
     elif args.command == "render-status":
         metadata_dir = Path(args.metadata_dir) if args.metadata_dir else None
         return render_status_command(metadata, args.data_dir, metadata_dir)

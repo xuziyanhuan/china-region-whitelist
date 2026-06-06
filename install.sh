@@ -272,6 +272,89 @@ run_apply_or_dry_run() {
   persist_rules
 }
 
+run_docker_whitelist_menu() {
+  whitelist_require_root
+  whitelist_require_commands
+
+  local -a docker_bridges selected_bridges
+  mapfile -t docker_bridges < <(
+    {
+      ip link show docker0 >/dev/null 2>&1 && printf '%s\n' docker0
+      ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^br-/ {print $2}'
+    } | awk '!seen[$0]++'
+  )
+
+  if [[ "${#docker_bridges[@]}" -eq 0 ]]; then
+    echo "未发现 docker0 或 br-* Docker 网桥。"
+    return
+  fi
+
+  echo
+  echo "Docker 白名单："
+  echo "1. 所有 Docker 网桥"
+  echo "2. 仅 docker0"
+  echo "3. 手动选择"
+  local docker_choice
+  docker_choice="$(read_from_tty "请输入数字: ")"
+
+  case "${docker_choice}" in
+    1)
+      selected_bridges=("${docker_bridges[@]}")
+      ;;
+    2)
+      if ip link show docker0 >/dev/null 2>&1; then
+        selected_bridges=("docker0")
+      else
+        echo "当前不存在 docker0。"
+        return
+      fi
+      ;;
+    3)
+      echo "当前 Docker 网桥："
+      local index
+      for index in "${!docker_bridges[@]}"; do
+        echo "$((index + 1)). ${docker_bridges[index]}"
+      done
+      local selection selected_index bridge seen_bridges=" "
+      selection="$(read_from_tty "请选择网桥编号（多个用空格/逗号分隔）: ")"
+      while IFS= read -r selected_index; do
+        [[ -n "${selected_index}" ]] || continue
+        if ! [[ "${selected_index}" =~ ^[0-9]+$ ]] || (( selected_index < 1 || selected_index > ${#docker_bridges[@]} )); then
+          echo "输入无效：${selected_index}。"
+          return
+        fi
+        bridge="${docker_bridges[$((selected_index - 1))]}"
+        if [[ "${seen_bridges}" != *" ${bridge} "* ]]; then
+          selected_bridges+=("${bridge}")
+          seen_bridges+="${bridge} "
+        fi
+      done < <(split_user_list "${selection}")
+      ;;
+    *)
+      echo "输入无效。"
+      return
+      ;;
+  esac
+
+  if [[ "${#selected_bridges[@]}" -eq 0 ]]; then
+    echo "未选择任何 Docker 网桥。"
+    return
+  fi
+
+  echo "将写入以下 Docker 网桥白名单：${selected_bridges[*]}"
+  read -r -p "确认继续？[Y/n]: " confirm
+  case "${confirm}" in
+    n|N|no|NO) echo "已取消。"; return ;;
+    *) ;;
+  esac
+
+  local interfaces_csv
+  interfaces_csv="$(IFS=,; echo "${selected_bridges[*]}")"
+  whitelist_render_docker_apply_commands "${interfaces_csv}" | whitelist_run_rendered_commands
+  echo "Docker 白名单已应用。"
+  persist_rules
+}
+
 persist_rules() {
   echo
   echo "正在保存规则以便重启后自动恢复..."
@@ -552,11 +635,12 @@ show_menu() {
 请选择操作：
 0. 退出
 1. 应用白名单规则
-2. 查看当前托管规则
-3. 清除本脚本创建的规则和 ipset
-4. 更新本地 CIDR 数据
-5. 检查并更新脚本
-6. 清除规则并删除脚本本体
+2. Docker 白名单
+3. 查看当前托管规则
+4. 清除本脚本创建的规则和 ipset
+5. 更新本地 CIDR 数据
+6. 检查并更新脚本
+7. 清除规则并删除脚本本体
 EOF
 
     local choice
@@ -564,12 +648,13 @@ EOF
     case "${choice}" in
       0) echo "退出。"; exit 0 ;;
       1) run_apply_or_dry_run 0; read -r -p "按回车键返回菜单..." ;;
-      2) status_rules; read -r -p "按回车键返回菜单..." ;;
-      3) clear_rules; read -r -p "按回车键返回菜单..." ;;
-      4) update_cidr_data ;;
-      5) update_script ;;
-      6) uninstall_all ;;
-      *) echo "输入无效，请输入 0-6。"; sleep 0.5 ;;
+      2) run_docker_whitelist_menu; read -r -p "按回车键返回菜单..." ;;
+      3) status_rules; read -r -p "按回车键返回菜单..." ;;
+      4) clear_rules; read -r -p "按回车键返回菜单..." ;;
+      5) update_cidr_data ;;
+      6) update_script ;;
+      7) uninstall_all ;;
+      *) echo "输入无效，请输入 0-7。"; sleep 0.5 ;;
     esac
   done
 }

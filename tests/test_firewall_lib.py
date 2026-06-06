@@ -77,9 +77,8 @@ class FirewallLibTests(unittest.TestCase):
         self.assertEqual(lo_count, 1, "lo rule should appear exactly once for INPUT")
         lo_count = result.stdout.count("iptables -C FORWARD -i lo -j ACCEPT")
         self.assertEqual(lo_count, 1, "lo rule should appear exactly once for FORWARD")
-        # Docker 网桥循环应该只出现一次（在最后）
-        docker_count = result.stdout.count('for iface in docker0 $(ip link show | awk')
-        self.assertEqual(docker_count, 2, "docker bridge loop should appear once per chain (INPUT and FORWARD)")
+        self.assertNotIn("for iface in docker0", result.stdout)
+        self.assertNotIn("-i docker0 -j ACCEPT; fi", result.stdout)
 
         for port in ("22", "80", "443"):
             with self.subTest(port=port):
@@ -87,7 +86,7 @@ class FirewallLibTests(unittest.TestCase):
                 self.assertIn(f"iptables -N WL_{port} 2>/dev/null || true", result.stdout)
                 self.assertIn(
                     f"iptables -C INPUT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I INPUT 2 -j WL_{port}",
+                    f"{{ insert_pos=$(iptables -S INPUT | awk",
                     result.stdout,
                 )
                 self.assertIn(
@@ -97,7 +96,7 @@ class FirewallLibTests(unittest.TestCase):
                 )
                 self.assertIn(
                     f"iptables -C FORWARD -m conntrack --ctstate DNAT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I FORWARD 2 -m conntrack --ctstate DNAT -j WL_{port}",
+                    f"{{ insert_pos=$(iptables -S FORWARD | awk",
                     result.stdout,
                 )
                 self.assertIn(
@@ -108,6 +107,16 @@ class FirewallLibTests(unittest.TestCase):
         self.assertNotIn("po0_region_whitelist", result.stdout)
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("multiport", result.stdout)
+
+    def test_port_jumps_insert_after_loopback_and_docker_bridges(self):
+        result = run_tool("render-apply", "--ports", "22", "990100")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('-A INPUT -i lo -j ACCEPT', result.stdout)
+        self.assertIn('^-A INPUT -i (docker0|br-[^ ]+) -j ACCEPT$', result.stdout)
+        self.assertIn('iptables -I INPUT $insert_pos -j WL_22', result.stdout)
+        self.assertIn('^-A FORWARD -i (docker0|br-[^ ]+) -j ACCEPT$', result.stdout)
+        self.assertIn('iptables -I FORWARD $insert_pos -m conntrack --ctstate DNAT -j WL_22', result.stdout)
 
     def test_renders_manual_whitelist_ips(self):
         result = run_tool("render-apply", "--ports", "22", "990100", "198.51.100.7", "203.0.113.0/24")
@@ -156,9 +165,23 @@ class FirewallLibTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i lo -j ACCEPT", result.stdout)
         self.assertIn("iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i lo -j ACCEPT", result.stdout)
-        # 验证 Docker 网桥接口豁免（包括 docker0 和 br- 开头的接口）
-        self.assertIn('for iface in docker0 $(ip link show | awk -F\': \' \'/^[0-9]+: br-/ {print $2}\'); do', result.stdout)
-        self.assertIn('if ip link show "$iface" >/dev/null 2>&1; then iptables -C INPUT -i "$iface" -j ACCEPT 2>/dev/null || iptables -I INPUT 2 -i "$iface" -j ACCEPT; fi; done', result.stdout)
+        self.assertNotIn("for iface in docker0", result.stdout)
+        self.assertNotIn("-i docker0 -j ACCEPT; fi", result.stdout)
+
+    def test_renders_docker_whitelist_rules(self):
+        result = run_tool("render-docker-apply", "--interfaces", "docker0,br-9731588312b1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('for iface in $(iptables -S INPUT | awk \'/^-A INPUT -i (docker0|br-[^ ]+) -j ACCEPT$/ {print $4}\' | sort -u); do while iptables -C INPUT -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D INPUT -i "$iface" -j ACCEPT; done; done', result.stdout)
+        self.assertIn('for iface in $(iptables -S FORWARD | awk \'/^-A FORWARD -i (docker0|br-[^ ]+) -j ACCEPT$/ {print $4}\' | sort -u); do while iptables -C FORWARD -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i "$iface" -j ACCEPT; done; done', result.stdout)
+        self.assertIn("if ip link show br-9731588312b1 >/dev/null 2>&1; then iptables -I INPUT 2 -i br-9731588312b1 -j ACCEPT; fi", result.stdout)
+        self.assertIn("if ip link show docker0 >/dev/null 2>&1; then iptables -I INPUT 2 -i docker0 -j ACCEPT; fi", result.stdout)
+        self.assertIn("iptables -I FORWARD 2 -i br-9731588312b1 -j ACCEPT", result.stdout)
+
+    def test_rejects_invalid_docker_interfaces(self):
+        result = run_tool("render-docker-apply", "--interfaces", "eth0")
+
+        self.assertNotEqual(result.returncode, 0)
 
     def test_rejects_invalid_ports(self):
         for ports in ("0", "65536", "abc"):
@@ -231,18 +254,24 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn('exec bash "${ROOT}/install.sh" U', script)
         self.assertIn("0. 退出", script)
         self.assertIn("1. 应用白名单规则", script)
-        self.assertIn("2. 查看当前托管规则", script)
-        self.assertIn("3. 清除本脚本创建的规则和 ipset", script)
-        self.assertIn("4. 更新本地 CIDR 数据", script)
-        self.assertIn("5. 检查并更新脚本", script)
-        self.assertIn("6. 清除规则并删除脚本本体", script)
+        self.assertIn("2. Docker 白名单", script)
+        self.assertIn("3. 查看当前托管规则", script)
+        self.assertIn("4. 清除本脚本创建的规则和 ipset", script)
+        self.assertIn("5. 更新本地 CIDR 数据", script)
+        self.assertIn("6. 检查并更新脚本", script)
+        self.assertIn("7. 清除规则并删除脚本本体", script)
         self.assertIn("0) echo \"退出。\"; exit 0 ;;", script)
         self.assertIn("1) run_apply_or_dry_run 0", script)
-        self.assertIn("2) status_rules", script)
-        self.assertIn("3) clear_rules", script)
-        self.assertIn("4) update_cidr_data ;;", script)
-        self.assertIn("5) update_script ;;", script)
-        self.assertIn("6) uninstall_all ;;", script)
+        self.assertIn("2) run_docker_whitelist_menu", script)
+        self.assertIn("3) status_rules", script)
+        self.assertIn("4) clear_rules", script)
+        self.assertIn("5) update_cidr_data ;;", script)
+        self.assertIn("6) update_script ;;", script)
+        self.assertIn("7) uninstall_all ;;", script)
+        self.assertIn("1. 所有 Docker 网桥", script)
+        self.assertIn("2. 仅 docker0", script)
+        self.assertIn("3. 手动选择", script)
+        self.assertIn('whitelist_render_docker_apply_commands "${interfaces_csv}"', script)
 
     def test_install_script_update_reloads_new_script(self):
         script = INSTALL_SH.read_text(encoding="utf-8")
@@ -265,6 +294,12 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("whitelist_render_clear_commands | whitelist_run_rendered_commands", script)
         self.assertIn("rm -f /usr/local/bin/U /usr/local/bin/u", script)
         self.assertIn("rm -rf -- \"${basename}\"", script)
+
+    def test_firewall_lib_renders_docker_apply_commands(self):
+        script = FIREWALL_LIB.read_text(encoding="utf-8")
+
+        self.assertIn("whitelist_render_docker_apply_commands()", script)
+        self.assertIn('whitelist_region_tool render-docker-apply --interfaces "${interfaces}"', script)
 
     def test_firewall_lib_auto_installs_missing_iptables_and_ipset(self):
         script = FIREWALL_LIB.read_text(encoding="utf-8")

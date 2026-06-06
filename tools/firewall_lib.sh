@@ -79,6 +79,11 @@ whitelist_render_clear_commands() {
   fi
 }
 
+whitelist_render_docker_apply_commands() {
+  local interfaces="${1:-}"
+  whitelist_region_tool render-docker-apply --interfaces "${interfaces}"
+}
+
 whitelist_require_root() {
   if [[ "${EUID}" -ne 0 ]]; then
     echo "此操作需要 root 权限，请使用 sudo 或 root 用户运行。" >&2
