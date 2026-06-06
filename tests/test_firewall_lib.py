@@ -317,10 +317,11 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn('whitelist_render_lo_clear_commands | whitelist_run_rendered_commands', script)
         self.assertIn("已清除 lo 白名单。", script)
         self.assertIn('端口 ${requested_port} 当前未由本脚本管理，请重新选择。', script)
-        self.assertIn("未选择任何当前托管的端口。", script)
+        self.assertIn("未选择任何当前托管的端口，返回上级菜单。", script)
         self.assertIn('local -a selected_ports=()', script)
         self.assertIn('done < <(split_user_list "${selection}")', script)
         self.assertIn("return", script)
+        self.assertNotIn("未选择任何当前托管的端口。", script)
         self.assertNotIn("IFS=' ' read -r -a selected_ports <<<\"${selection}\"", script)
 
     def test_install_script_supports_uninstalling_rules_shortcuts_and_project(self):

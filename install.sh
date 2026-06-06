@@ -503,7 +503,7 @@ clear_rules() {
 
     if [[ "${#managed_ports[@]}" -eq 0 ]]; then
       echo "当前没有管理任何端口规则，请选择 1 清除 Docker 白名单、2 清除 lo 白名单或 0 返回。"
-      continue
+      return
     fi
 
     local -a selected_ports=()
@@ -529,8 +529,8 @@ clear_rules() {
     done < <(split_user_list "${selection}")
 
     if [[ "${skipped}" -eq 1 || "${#selected_ports[@]}" -eq 0 ]]; then
-      echo "未选择任何当前托管的端口。"
-      continue
+      echo "未选择任何当前托管的端口，返回上级菜单。"
+      return
     fi
 
     echo "将清除以下端口的规则：${selected_ports[*]}"
