@@ -72,11 +72,15 @@ class FirewallLibTests(unittest.TestCase):
         result = run_tool("render-apply", "--ports", "22,80,443", "990100")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        # lo 规则应该只出现一次（在开始处）
+        # lo 和 docker0 规则应该只出现一次（在开始处）
         lo_count = result.stdout.count("iptables -C INPUT -i lo -j ACCEPT")
         self.assertEqual(lo_count, 1, "lo rule should appear exactly once for INPUT")
         lo_count = result.stdout.count("iptables -C FORWARD -i lo -j ACCEPT")
         self.assertEqual(lo_count, 1, "lo rule should appear exactly once for FORWARD")
+        docker_count = result.stdout.count("iptables -C INPUT -i docker0 -j ACCEPT")
+        self.assertEqual(docker_count, 1, "docker0 rule should appear exactly once for INPUT")
+        docker_count = result.stdout.count("iptables -C FORWARD -i docker0 -j ACCEPT")
+        self.assertEqual(docker_count, 1, "docker0 rule should appear exactly once for FORWARD")
 
         for port in ("22", "80", "443"):
             with self.subTest(port=port):
@@ -84,7 +88,7 @@ class FirewallLibTests(unittest.TestCase):
                 self.assertIn(f"iptables -N WL_{port} 2>/dev/null || true", result.stdout)
                 self.assertIn(
                     f"iptables -C INPUT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I INPUT 2 -j WL_{port}",
+                    f"iptables -I INPUT 3 -j WL_{port}",
                     result.stdout,
                 )
                 self.assertIn(
@@ -94,7 +98,7 @@ class FirewallLibTests(unittest.TestCase):
                 )
                 self.assertIn(
                     f"iptables -C FORWARD -m conntrack --ctstate DNAT -j WL_{port} 2>/dev/null || "
-                    f"iptables -I FORWARD 2 -m conntrack --ctstate DNAT -j WL_{port}",
+                    f"iptables -I FORWARD 3 -m conntrack --ctstate DNAT -j WL_{port}",
                     result.stdout,
                 )
                 self.assertIn(
@@ -105,7 +109,6 @@ class FirewallLibTests(unittest.TestCase):
         self.assertNotIn("po0_region_whitelist", result.stdout)
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("multiport", result.stdout)
-        self.assertNotIn("iptables -C FORWARD -j WL_22 2>/dev/null || iptables -I FORWARD 1 -j WL_22", result.stdout)
 
     def test_renders_manual_whitelist_ips(self):
         result = run_tool("render-apply", "--ports", "22", "990100", "198.51.100.7", "203.0.113.0/24")
@@ -130,9 +133,11 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("ipset list -name 2>/dev/null | awk '/^wl_/'", result.stdout)
         self.assertNotIn("WHITELIST", result.stdout)
         self.assertNotIn("po0", result.stdout)
-        # 清除所有规则时应该删除 lo 规则
+        # 清除所有规则时应该删除 lo 和 docker0 规则
         self.assertIn("while iptables -C INPUT -i lo -j ACCEPT 2>/dev/null; do iptables -D INPUT -i lo -j ACCEPT; done", result.stdout)
         self.assertIn("while iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i lo -j ACCEPT; done", result.stdout)
+        self.assertIn("while iptables -C INPUT -i docker0 -j ACCEPT 2>/dev/null; do iptables -D INPUT -i docker0 -j ACCEPT; done", result.stdout)
+        self.assertIn("while iptables -C FORWARD -i docker0 -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i docker0 -j ACCEPT; done", result.stdout)
 
     def test_clear_specific_ports(self):
         result = run_tool("render-clear", "--ports", "22,80")
@@ -152,6 +157,9 @@ class FirewallLibTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i lo -j ACCEPT", result.stdout)
         self.assertIn("iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i lo -j ACCEPT", result.stdout)
+        # 验证 docker0 接口豁免（条件性）
+        self.assertIn("if ip link show docker0 >/dev/null 2>&1; then iptables -C INPUT -i docker0 -j ACCEPT 2>/dev/null || iptables -I INPUT 2 -i docker0 -j ACCEPT; fi", result.stdout)
+        self.assertIn("if ip link show docker0 >/dev/null 2>&1; then iptables -C FORWARD -i docker0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 2 -i docker0 -j ACCEPT; fi", result.stdout)
 
     def test_rejects_invalid_ports(self):
         for ports in ("0", "65536", "abc"):

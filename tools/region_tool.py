@@ -184,12 +184,20 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
 
     commands: list[str] = []
 
-    # 首先确保 lo 接口放行规则在最前面（只添加一次）
+    # 首先确保 lo 和 docker0 接口放行规则在最前面
     for chain in ENTRY_CHAINS:
+        # lo 接口放行
         lo_rule = f"-i lo -j ACCEPT"
         commands.append(
             f"iptables -C {chain} {lo_rule} 2>/dev/null || "
             f"iptables -I {chain} 1 {lo_rule}"
+        )
+        # docker0 接口放行（如果存在）
+        docker_rule = f"-i docker0 -j ACCEPT"
+        commands.append(
+            f"if ip link show docker0 >/dev/null 2>&1; then "
+            f"iptables -C {chain} {docker_rule} 2>/dev/null || "
+            f"iptables -I {chain} 2 {docker_rule}; fi"
         )
 
     for port in ports:
@@ -204,10 +212,10 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
             commands.append(f"ipset add {set_name} {client_ip} -exist")
 
         commands.append(f"iptables -N {chain_name} 2>/dev/null || true")
-        # 白名单链插入到位置 2（在 lo 规则之后）
+        # 白名单链插入到位置 3（在 lo 和 docker0 之后）
         commands.append(
             f"iptables -C INPUT -j {chain_name} 2>/dev/null || "
-            f"iptables -I INPUT 2 -j {chain_name}"
+            f"iptables -I INPUT 3 -j {chain_name}"
         )
         commands.append(
             f"while iptables -C FORWARD -j {chain_name} 2>/dev/null; "
@@ -216,7 +224,7 @@ def render_apply_commands(cidrs: list[str], ports: list[str], client_ip: str = "
         forward_jump = f"-m conntrack --ctstate DNAT -j {chain_name}"
         commands.append(
             f"iptables -C FORWARD {forward_jump} 2>/dev/null || "
-            f"iptables -I FORWARD 2 {forward_jump}"
+            f"iptables -I FORWARD 3 {forward_jump}"
         )
         for protocol in ("tcp", "udp"):
             port_match = f"-p {protocol} --dport {port}"
@@ -276,12 +284,17 @@ def render_clear_commands(ports: list[str] | None = None) -> list[str]:
                 f"for set_name in $(ipset list -name 2>/dev/null | awk '/^{SET_PREFIX}/'); do ipset destroy $set_name 2>/dev/null || true; done",
             ]
         )
-        # 清除所有端口规则后，删除 lo 接口放行规则
+        # 清除所有端口规则后，删除 lo 和 docker0 接口放行规则
         for chain in ENTRY_CHAINS:
             lo_rule = f"-i lo -j ACCEPT"
             commands.append(
                 f"while iptables -C {chain} {lo_rule} 2>/dev/null; "
                 f"do iptables -D {chain} {lo_rule}; done"
+            )
+            docker_rule = f"-i docker0 -j ACCEPT"
+            commands.append(
+                f"while iptables -C {chain} {docker_rule} 2>/dev/null; "
+                f"do iptables -D {chain} {docker_rule}; done"
             )
     else:
         for port in ports:
