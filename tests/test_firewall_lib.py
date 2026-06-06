@@ -137,6 +137,13 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("ipset destroy wl_80", result.stdout)
         self.assertNotIn("for chain in", result.stdout)
 
+    def test_exempts_loopback_interface(self):
+        result = run_tool("render-apply", "--ports", "22", "990000")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i lo -j ACCEPT", result.stdout)
+        self.assertIn("iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i lo -j ACCEPT", result.stdout)
+
     def test_rejects_invalid_ports(self):
         for ports in ("0", "65536", "abc"):
             with self.subTest(ports=ports):
