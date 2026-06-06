@@ -299,6 +299,10 @@ def build_cidr_to_region_map(data_dir: Path) -> dict[str, str]:
                 cidr = cidr.strip()
                 if cidr and not cidr.startswith("#"):
                     cidr_to_region[cidr] = region_code
+                    # ipset normalizes /32 to IP without suffix, so map both forms
+                    if cidr.endswith("/32"):
+                        ip_without_suffix = cidr[:-3]
+                        cidr_to_region[ip_without_suffix] = region_code
         except Exception:
             continue
 
