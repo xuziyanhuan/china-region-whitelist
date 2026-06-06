@@ -457,6 +457,7 @@ clear_rules() {
     echo "清除选项："
     echo "0. 返回上级菜单"
     echo "1. 清除 Docker 白名单"
+    echo "2. 清除 lo 白名单"
     echo "ALL. 清除全部端口规则、lo 和 Docker 白名单"
     echo
 
@@ -473,7 +474,15 @@ clear_rules() {
       whitelist_render_docker_clear_commands | whitelist_run_rendered_commands
       echo "已清除 Docker 白名单。"
       persist_rules
-      continue
+      return
+    fi
+
+    if [[ "${selection}" == "2" ]]; then
+      echo "将清除 lo 白名单..."
+      whitelist_render_lo_clear_commands | whitelist_run_rendered_commands
+      echo "已清除 lo 白名单。"
+      persist_rules
+      return
     fi
 
     if [[ "${selection^^}" == "ALL" ]]; then
@@ -489,11 +498,11 @@ clear_rules() {
       fi
       echo "已清除全部规则。"
       persist_rules
-      continue
+      return
     fi
 
     if [[ "${#managed_ports[@]}" -eq 0 ]]; then
-      echo "当前没有管理任何端口规则，请选择 1 清除 Docker 白名单或 0 返回。"
+      echo "当前没有管理任何端口规则，请选择 1 清除 Docker 白名单、2 清除 lo 白名单或 0 返回。"
       continue
     fi
 
@@ -544,6 +553,7 @@ clear_rules() {
 
     echo "已清除选定的规则。"
     persist_rules
+    return
   done
 }
 

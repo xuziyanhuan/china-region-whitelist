@@ -288,6 +288,17 @@ def render_docker_clear_commands() -> list[str]:
     return commands
 
 
+def render_lo_clear_commands() -> list[str]:
+    commands: list[str] = []
+    for chain in ENTRY_CHAINS:
+        lo_rule = f"-i lo -j ACCEPT"
+        commands.append(
+            f"while iptables -C {chain} {lo_rule} 2>/dev/null; "
+            f"do iptables -D {chain} {lo_rule}; done"
+        )
+    return commands
+
+
 def list_managed_ports() -> list[str]:
     """List all ports currently managed by whitelist rules."""
     try:
@@ -568,6 +579,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("render-docker-clear")
 
+    subparsers.add_parser("render-lo-clear")
+
     status_parser = subparsers.add_parser("render-status")
     status_parser.add_argument("--metadata-dir", default="")
 
@@ -640,6 +653,8 @@ def main() -> int:
         print("\n".join(render_docker_apply_commands(args.interfaces)))
     elif args.command == "render-docker-clear":
         print("\n".join(render_docker_clear_commands()))
+    elif args.command == "render-lo-clear":
+        print("\n".join(render_lo_clear_commands()))
     elif args.command == "render-status":
         metadata_dir = Path(args.metadata_dir) if args.metadata_dir else None
         return render_status_command(metadata, args.data_dir, metadata_dir)

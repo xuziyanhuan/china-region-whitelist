@@ -188,6 +188,16 @@ class FirewallLibTests(unittest.TestCase):
         self.assertNotIn("WL_", result.stdout)
         self.assertNotIn("ipset destroy", result.stdout)
 
+    def test_renders_lo_clear_rules(self):
+        result = run_tool("render-lo-clear")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("while iptables -C INPUT -i lo -j ACCEPT 2>/dev/null; do iptables -D INPUT -i lo -j ACCEPT; done", result.stdout)
+        self.assertIn("while iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i lo -j ACCEPT; done", result.stdout)
+        self.assertNotIn("docker0", result.stdout)
+        self.assertNotIn("WL_", result.stdout)
+        self.assertNotIn("ipset destroy", result.stdout)
+
     def test_rejects_invalid_docker_interfaces(self):
         result = run_tool("render-docker-apply", "--interfaces", "eth0")
 
@@ -301,13 +311,16 @@ class FirewallLibTests(unittest.TestCase):
 
         self.assertIn("0. 返回上级菜单", script)
         self.assertIn("1. 清除 Docker 白名单", script)
+        self.assertIn("2. 清除 lo 白名单", script)
         self.assertIn('if [[ "${selection}" == "0" ]]; then', script)
         self.assertIn('whitelist_render_docker_clear_commands | whitelist_run_rendered_commands', script)
+        self.assertIn('whitelist_render_lo_clear_commands | whitelist_run_rendered_commands', script)
+        self.assertIn("已清除 lo 白名单。", script)
         self.assertIn('端口 ${requested_port} 当前未由本脚本管理，请重新选择。', script)
         self.assertIn("未选择任何当前托管的端口。", script)
         self.assertIn('local -a selected_ports=()', script)
         self.assertIn('done < <(split_user_list "${selection}")', script)
-        self.assertIn("continue", script)
+        self.assertIn("return", script)
         self.assertNotIn("IFS=' ' read -r -a selected_ports <<<\"${selection}\"", script)
 
     def test_install_script_supports_uninstalling_rules_shortcuts_and_project(self):
@@ -326,6 +339,8 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn('whitelist_region_tool render-docker-apply --interfaces "${interfaces}"', script)
         self.assertIn("whitelist_render_docker_clear_commands()", script)
         self.assertIn("whitelist_region_tool render-docker-clear", script)
+        self.assertIn("whitelist_render_lo_clear_commands()", script)
+        self.assertIn("whitelist_region_tool render-lo-clear", script)
 
     def test_firewall_lib_auto_installs_missing_iptables_and_ipset(self):
         script = FIREWALL_LIB.read_text(encoding="utf-8")
