@@ -144,8 +144,6 @@ def collect_cidrs(metadata: dict, data_dir: Path, codes: list[str]) -> tuple[lis
                 seen.add(line)
                 cidrs.append(line)
 
-    if not cidrs:
-        raise SystemExit("No CIDR ranges or IPs provided")
     return cidrs, manual_ips
 
 
@@ -480,7 +478,7 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--ports", required=True, type=parse_ports)
     render.add_argument("--manual-ips", default="")
     render.add_argument("--metadata-dir", default="")
-    render.add_argument("codes", nargs="+")
+    render.add_argument("codes", nargs="*")
 
     clear_parser = subparsers.add_parser("render-clear")
     clear_parser.add_argument("--ports", type=parse_ports, default=None)
@@ -521,6 +519,11 @@ def main() -> int:
             extra_manual_ips = [ip.strip() for ip in args.manual_ips.split(",") if ip.strip()]
             all_manual_ips.extend(extra_manual_ips)
 
+        # 验证至少有一个 IP 来源
+        extra_manual_ips = [ip.strip() for ip in args.manual_ips.split(",") if ip.strip()] if args.manual_ips else []
+        if not cidrs and not extra_manual_ips and not args.client_ip:
+            raise SystemExit("No CIDR ranges, manual IPs, or client IP provided")
+
         # 保存手动 IP 元数据
         if args.metadata_dir and all_manual_ips:
             metadata_dir = Path(args.metadata_dir)
@@ -545,8 +548,6 @@ def main() -> int:
                 existing_ips.add(args.client_ip)
                 port_metadata_file.write_text("\n".join(sorted(existing_ips)) + "\n", encoding="utf-8")
 
-        # 从 --manual-ips 解析的额外手动 IP
-        extra_manual_ips = [ip.strip() for ip in args.manual_ips.split(",") if ip.strip()] if args.manual_ips else []
         print("\n".join(render_apply_commands(cidrs, args.ports, args.client_ip, extra_manual_ips)))
     elif args.command == "render-clear":
         print("\n".join(render_clear_commands(args.ports)))
