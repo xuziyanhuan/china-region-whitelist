@@ -329,7 +329,12 @@ class FirewallLibTests(unittest.TestCase):
 
         self.assertIn("uninstall) uninstall_all ;;", script)
         self.assertIn("输入 DELETE", script)
+        self.assertIn("正在清除端口规则和 ipset...", script)
         self.assertIn("whitelist_render_clear_commands | whitelist_run_rendered_commands", script)
+        self.assertIn("正在清除 lo 白名单...", script)
+        self.assertIn("whitelist_render_lo_clear_commands | whitelist_run_rendered_commands", script)
+        self.assertIn("正在清除 Docker 网桥白名单...", script)
+        self.assertIn("whitelist_render_docker_clear_commands | whitelist_run_rendered_commands", script)
         self.assertIn("rm -f /usr/local/bin/U /usr/local/bin/u", script)
         self.assertIn("rm -rf -- \"${basename}\"", script)
 

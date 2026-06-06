@@ -567,7 +567,15 @@ uninstall_all() {
   fi
 
   whitelist_require_commands
+  echo "正在清除端口规则和 ipset..."
   whitelist_render_clear_commands | whitelist_run_rendered_commands
+  echo "正在清除 lo 白名单..."
+  whitelist_render_lo_clear_commands | whitelist_run_rendered_commands
+  echo "正在清除 Docker 网桥白名单..."
+  whitelist_render_docker_clear_commands | whitelist_run_rendered_commands
+  if [[ -d "${ROOT}/.metadata" ]]; then
+    rm -f "${ROOT}/.metadata/manual_ips_"*.txt
+  fi
   rm -f /usr/local/bin/U /usr/local/bin/u
   local parent basename
   parent="$(dirname "${ROOT}")"
