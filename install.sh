@@ -467,9 +467,28 @@ clear_rules() {
       echo "已清除元数据文件。"
     fi
   else
-    IFS=' ' read -r -a selected_ports <<<"${selection}"
+    local requested_port managed_port found seen_ports=" "
+    while IFS= read -r requested_port; do
+      [[ -n "${requested_port}" ]] || continue
+      found=0
+      for managed_port in "${managed_ports[@]}"; do
+        if [[ "${requested_port}" == "${managed_port}" ]]; then
+          found=1
+          break
+        fi
+      done
+      if [[ "${found}" -eq 1 ]]; then
+        if [[ "${seen_ports}" != *" ${requested_port} "* ]]; then
+          selected_ports+=("${requested_port}")
+          seen_ports+="${requested_port} "
+        fi
+      else
+        echo "端口 ${requested_port} 当前未由本脚本管理，已跳过。"
+      fi
+    done < <(split_user_list "${selection}")
+
     if [[ "${#selected_ports[@]}" -eq 0 ]]; then
-      echo "未选择任何端口。"
+      echo "未选择任何当前托管的端口。"
       return
     fi
 

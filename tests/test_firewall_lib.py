@@ -286,6 +286,14 @@ class FirewallLibTests(unittest.TestCase):
         self.assertIn("== iptables 规则详情 ==", script)
         self.assertIn("awk '/^-N WL_/ {print $2}'", script)
 
+    def test_install_script_skips_unmanaged_clear_ports(self):
+        script = INSTALL_SH.read_text(encoding="utf-8")
+
+        self.assertIn('端口 ${requested_port} 当前未由本脚本管理，已跳过。', script)
+        self.assertIn("未选择任何当前托管的端口。", script)
+        self.assertIn('done < <(split_user_list "${selection}")', script)
+        self.assertNotIn("IFS=' ' read -r -a selected_ports <<<\"${selection}\"", script)
+
     def test_install_script_supports_uninstalling_rules_shortcuts_and_project(self):
         script = INSTALL_SH.read_text(encoding="utf-8")
 
