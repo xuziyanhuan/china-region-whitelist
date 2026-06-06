@@ -401,6 +401,14 @@ clear_rules() {
       fi
     done
     echo "已清除元数据文件。"
+
+    # 检查是否还有剩余的管理端口
+    local -a remaining_ports
+    mapfile -t remaining_ports < <(whitelist_list_managed_ports)
+    if [[ "${#remaining_ports[@]}" -eq 0 ]]; then
+      echo "所有端口规则已清除，正在删除 lo 和 Docker 网桥接口规则..."
+      whitelist_render_clear_commands | whitelist_run_rendered_commands
+    fi
   fi
 
   echo "已清除选定的规则。"
