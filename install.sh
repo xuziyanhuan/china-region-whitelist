@@ -64,6 +64,30 @@ read_from_tty() {
   printf '%s\n' "${value}"
 }
 
+# 去重列表：输入空格分隔的字符串，输出去重后的数组
+deduplicate_list() {
+  local -n output_array="$1"
+  shift
+  local seen=" " item
+  for item in "$@"; do
+    if [[ "${seen}" != *" ${item} "* ]]; then
+      output_array+=("${item}")
+      seen+="${item} "
+    fi
+  done
+}
+
+# 确认操作：提示用户确认，返回 0 继续，返回 1 取消
+confirm_action() {
+  local prompt="${1:-确认继续？[Y/n]: }"
+  local answer
+  read -r -p "${prompt}" answer
+  case "${answer:-Y}" in
+    n|N|no|NO) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 code_at_index() {
   local rows="$1"
   local index="$2"
@@ -147,13 +171,14 @@ interactive_select_ports() {
   echo >&2
   echo "请输入需要限制的端口，多个用空格/逗号分隔，例如：22 80 443" >&2
 
-  local port_input port port_number seen_ports=" "
+  local port_input port port_number
   port_input="$(read_from_tty "端口: ")"
   [[ -n "${port_input}" ]] || {
     echo "未输入端口。" >&2
     exit 1
   }
 
+  local -a validated_ports=()
   while IFS= read -r port; do
     [[ -n "${port}" ]] || continue
     if ! [[ "${port}" =~ ^[0-9]+$ ]] || (( ${#port} > 5 )); then
@@ -165,11 +190,10 @@ interactive_select_ports() {
       echo "端口无效：${port}。请输入 1-65535 范围内的数字。" >&2
       exit 1
     fi
-    if [[ "${seen_ports}" != *" ${port_number} "* ]]; then
-      SELECTED_PORTS+=("${port_number}")
-      seen_ports+="${port_number} "
-    fi
+    validated_ports+=("${port_number}")
   done < <(split_user_list "${port_input}")
+
+  deduplicate_list SELECTED_PORTS "${validated_ports[@]}"
 
   if [[ "${#SELECTED_PORTS[@]}" -eq 0 ]]; then
     echo "未输入端口。" >&2
@@ -258,11 +282,10 @@ run_apply_or_dry_run() {
   whitelist_require_root
   whitelist_require_commands
   echo "即将应用规则：未命中白名单的来源访问所选 TCP/UDP 端口会被拒绝。"
-  read -r -p "确认继续？[Y/n]: " confirm
-  case "${confirm}" in
-    n|N|no|NO) echo "已取消。"; exit 0 ;;
-    *) ;;
-  esac
+  if ! confirm_action "确认继续？[Y/n]: "; then
+    echo "已取消。"
+    exit 0
+  fi
   local manual_ips_csv
   manual_ips_csv="$(IFS=,; echo "${manual_ips[*]}")"
   whitelist_render_apply_commands "${client_ip}" "${selected_ports_csv}" "${manual_ips_csv}" "${selected_codes[@]}" | whitelist_run_rendered_commands
@@ -315,7 +338,8 @@ run_docker_whitelist_menu() {
       for index in "${!docker_bridges[@]}"; do
         echo "$((index + 1)). ${docker_bridges[index]}"
       done
-      local selection selected_index bridge seen_bridges=" "
+      local selection selected_index bridge
+      local -a validated_bridges=()
       selection="$(read_from_tty "请选择网桥编号（多个用空格/逗号分隔）: ")"
       while IFS= read -r selected_index; do
         [[ -n "${selected_index}" ]] || continue
@@ -324,11 +348,9 @@ run_docker_whitelist_menu() {
           return
         fi
         bridge="${docker_bridges[$((selected_index - 1))]}"
-        if [[ "${seen_bridges}" != *" ${bridge} "* ]]; then
-          selected_bridges+=("${bridge}")
-          seen_bridges+="${bridge} "
-        fi
+        validated_bridges+=("${bridge}")
       done < <(split_user_list "${selection}")
+      deduplicate_list selected_bridges "${validated_bridges[@]}"
       ;;
     *)
       echo "输入无效。"
@@ -342,11 +364,10 @@ run_docker_whitelist_menu() {
   fi
 
   echo "将写入以下 Docker 网桥白名单：${selected_bridges[*]}"
-  read -r -p "确认继续？[Y/n]: " confirm
-  case "${confirm}" in
-    n|N|no|NO) echo "已取消。"; return ;;
-    *) ;;
-  esac
+  if ! confirm_action; then
+    echo "已取消。"
+    return
+  fi
 
   local interfaces_csv
   interfaces_csv="$(IFS=,; echo "${selected_bridges[*]}")"
@@ -507,7 +528,8 @@ clear_rules() {
     fi
 
     local -a selected_ports=()
-    local requested_port managed_port found seen_ports=" " skipped=0
+    local -a validated_ports=()
+    local requested_port managed_port found skipped=0
     while IFS= read -r requested_port; do
       [[ -n "${requested_port}" ]] || continue
       found=0
@@ -518,15 +540,14 @@ clear_rules() {
         fi
       done
       if [[ "${found}" -eq 1 ]]; then
-        if [[ "${seen_ports}" != *" ${requested_port} "* ]]; then
-          selected_ports+=("${requested_port}")
-          seen_ports+="${requested_port} "
-        fi
+        validated_ports+=("${requested_port}")
       else
         echo "端口 ${requested_port} 当前未由本脚本管理，请重新选择。"
         skipped=1
       fi
     done < <(split_user_list "${selection}")
+
+    deduplicate_list selected_ports "${validated_ports[@]}"
 
     if [[ "${skipped}" -eq 1 || "${#selected_ports[@]}" -eq 0 ]]; then
       echo "未选择任何当前托管的端口，返回上级菜单。"

@@ -350,9 +350,9 @@ def render_clear_commands(ports: list[str] | None = None) -> list[str]:
                 f"while iptables -C {chain} {lo_rule} 2>/dev/null; "
                 f"do iptables -D {chain} {lo_rule}; done"
             )
-            # 删除所有 Docker 网桥接口规则（docker0 和 br- 开头）
+            # 删除所有 Docker 网桥接口规则（直接从 iptables 规则解析，避免额外的 ip link 调用）
             commands.append(
-                f"for iface in docker0 $(ip link show | awk -F': ' '/^[0-9]+: br-/ {{print $2}}'); do "
+                f"for iface in $(iptables -S {chain} | awk '/^-A {chain} -i (docker0|br-[^ ]+) -j ACCEPT$/ {{print $4}}' | sort -u); do "
                 f"while iptables -C {chain} -i \"$iface\" -j ACCEPT 2>/dev/null; "
                 f"do iptables -D {chain} -i \"$iface\" -j ACCEPT; done; done"
             )

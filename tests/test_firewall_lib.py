@@ -144,8 +144,11 @@ class FirewallLibTests(unittest.TestCase):
         # 清除所有规则时应该删除 lo 和 Docker 网桥规则
         self.assertIn("while iptables -C INPUT -i lo -j ACCEPT 2>/dev/null; do iptables -D INPUT -i lo -j ACCEPT; done", result.stdout)
         self.assertIn("while iptables -C FORWARD -i lo -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i lo -j ACCEPT; done", result.stdout)
-        self.assertIn('for iface in docker0 $(ip link show | awk -F\': \' \'/^[0-9]+: br-/ {print $2}\'); do while iptables -C INPUT -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D INPUT -i "$iface" -j ACCEPT; done; done', result.stdout)
-        self.assertIn('for iface in docker0 $(ip link show | awk -F\': \' \'/^[0-9]+: br-/ {print $2}\'); do while iptables -C FORWARD -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i "$iface" -j ACCEPT; done; done', result.stdout)
+        # 优化后的 Docker 清理：直接从 iptables -S 解析，不再调用 ip link
+        self.assertIn("iptables -S INPUT | awk '/^-A INPUT -i (docker0|br-[^ ]+) -j ACCEPT$/ {print $4}' | sort -u", result.stdout)
+        self.assertIn("iptables -S FORWARD | awk '/^-A FORWARD -i (docker0|br-[^ ]+) -j ACCEPT$/ {print $4}' | sort -u", result.stdout)
+        self.assertIn('while iptables -C INPUT -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D INPUT -i "$iface" -j ACCEPT; done; done', result.stdout)
+        self.assertIn('while iptables -C FORWARD -i "$iface" -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i "$iface" -j ACCEPT; done; done', result.stdout)
 
     def test_clear_specific_ports(self):
         result = run_tool("render-clear", "--ports", "22,80")
